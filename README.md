@@ -111,6 +111,8 @@ gRPC的优势之一就是随着并发数的增大，吞吐率比较稳定，而r
 500|11|10|108|0|63|42025
 1000|26|23|263|0|144|36837
 
+### 图表对比
+
 <table>
 <tr><th>Environment</th><th>Throughputs</th><th>Mean Latency</th><th>P99 Latency</th></tr>
 <tr>
