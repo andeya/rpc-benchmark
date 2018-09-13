@@ -70,6 +70,8 @@ message BenchmarkMessage {
 
 ### teleport
 
+[teleport](https://github.com/henrylee2cn/teleport) 是一个通用、高效、灵活的Socket框架。可用于Peer-Peer对等通信、RPC、长连接网关、微服务、推送服务，游戏服务等领域。
+
 #### 一个服务器和一个客户端，在同一台机器上
 
 并发client|平均值(ms)|中位数(ms)|最大值(ms)|最小值(ms)|p99|吞吐率(TPS)
@@ -79,6 +81,7 @@ message BenchmarkMessage {
 1000|23|22|145|0|57|42867
 
 ### gRPC
+
 [gRPC](https://github.com/grpc/grpc-go) 是Google开发的一个RPC框架，支持多种编程语言。
 
 #### 一个服务器和一个客户端，在同一台机器上
@@ -91,7 +94,7 @@ message BenchmarkMessage {
 
 ### rpcx
 
-[rpcx](https://github.com/smallnest/rpcx) 是一款号称最快的RPC框架。
+[rpcx](https://github.com/smallnest/rpcx) 是一款号称非常性能很高的RPC框架。
 
 #### 一个服务器和一个客户端，在同一台机器上
 
