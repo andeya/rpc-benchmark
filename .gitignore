@@ -27,11 +27,8 @@ _testmain.go
 *.sublime-project
 *.sublime-workspace
 
-examples/simple/client
-examples/simple/server
-examples/ab/frame_client_ab
-examples/ab/server
-socket/example/client
+
+bin
 teleport/tp_server
 teleport/tp_client
 teleport/tp_mclient
