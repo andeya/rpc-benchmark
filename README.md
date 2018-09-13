@@ -64,7 +64,7 @@ message BenchmarkMessage {
 }
 ```
 
-测试的并发client是 100, 1000,2000 and 5000。总请求数一百万。
+测试的并发client是 100, 500 and 1000。总请求数一百万。
 
 **测试结果**
 
@@ -78,18 +78,8 @@ message BenchmarkMessage {
 500|11|10|67|0|29|44942
 1000|23|22|145|0|57|42867
 
-
-可以看出平均值和中位数值相差不大，说明没有太多的离谱的延迟。
-
-随着并发数的增大，服务器延迟也越长，这是正常的。
-
-
 ### gRPC
 [gRPC](https://github.com/grpc/grpc-go) 是Google开发的一个RPC框架，支持多种编程语言。
-
-我对gRPC和rpcx进行了相同的测试，得到了相应的测试结果。结果显示rpcx的性能要远远好于gRPC。
-gRPC的优势之一就是随着并发数的增大，吞吐率比较稳定，而rpcx随着并发数的增加性能有所下降，但总体吞吐率还是要高于gRPC的。
-
 
 #### 一个服务器和一个客户端，在同一台机器上
 
@@ -116,7 +106,7 @@ gRPC的优势之一就是随着并发数的增大，吞吐率比较稳定，而r
 <table>
 <tr><th>Environment</th><th>Throughputs</th><th>Mean Latency</th><th>P99 Latency</th></tr>
 <tr>
-<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/env.png"></td>
+<td width="10%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/env.png"></td>
 <td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/throughput.png"></td>
 <td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/mean_latency.png"></td>
 <td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/p99_latency.png"></td>
