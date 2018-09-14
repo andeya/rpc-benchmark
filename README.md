@@ -94,7 +94,7 @@ message BenchmarkMessage {
 
 ### rpcx
 
-[rpcx](https://github.com/smallnest/rpcx) 是一款号称非常性能很高的RPC框架。
+[rpcx](https://github.com/smallnest/rpcx) 是一款国人开发的类似阿里巴巴Dubbo 和微博Motan 的分布式的RPC服务框架，基于Golang net/rpc实现。
 
 #### 一个服务器和一个客户端，在同一台机器上
 
