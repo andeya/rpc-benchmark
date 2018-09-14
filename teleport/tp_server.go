@@ -9,7 +9,6 @@ import (
 	"time"
 
 	tp "github.com/henrylee2cn/teleport"
-	"github.com/henrylee2cn/teleport/proto/pbproto"
 )
 
 type Hello struct {
@@ -38,7 +37,6 @@ var (
 func main() {
 	flag.Parse()
 
-	tp.SetDefaultProtoFunc(pbproto.NewPbProtoFunc)
 	tp.SetLoggerLevel("ERROR")
 	tp.SetGopool(1024*1024*100, time.Minute*10)
 

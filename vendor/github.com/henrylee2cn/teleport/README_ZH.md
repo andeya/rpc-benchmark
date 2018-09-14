@@ -12,7 +12,7 @@ Teleport是一个通用、高效、灵活的Socket框架。
 
 ## 性能测试
 
-**测试用例**
+**自测**
 
 - 一个服务端与一个客户端进程，在同一台机器上运行
 - CPU:    Intel Xeon E312xx (Sandy Bridge) 16 cores 2.53GHz
@@ -22,8 +22,6 @@ Teleport是一个通用、高效、灵活的Socket框架。
 - 信息大小: 581 bytes
 - 信息编码：protobuf
 - 发送 1000000 条信息
-
-**测试结果**
 
 - teleport
 
@@ -45,7 +43,19 @@ Teleport是一个通用、高效、灵活的Socket框架。
 | 2000     | 8       | 6       | 64      | 0       | 183351   |
 | 5000     | 21      | 18      | 651     | 0       | 133886   |
 
-**[test code](https://github.com/henrylee2cn/rpc-benchmark/tree/master/teleport)**
+**对比测试**
+
+<table>
+<tr><th>Environment</th><th>Throughputs</th><th>Mean Latency</th><th>P99 Latency</th></tr>
+<tr>
+<td width="10%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/env.png"></td>
+<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/throughput.png"></td>
+<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/mean_latency.png"></td>
+<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/p99_latency.png"></td>
+</tr>
+</table>
+
+**[More Detail](https://github.com/henrylee2cn/rpc-benchmark)**
 
 - CPU耗时火焰图 teleport/socket
 
@@ -87,7 +97,7 @@ go get -u -f github.com/henrylee2cn/teleport
 - 支持插件机制，可以自定义认证、心跳、微服务注册中心、统计信息插件等
 - 无论服务器或客户端，均支持优雅重启、优雅关闭
 - 支持实现反向代理功能
-- 日志信息详尽，支持打印输入、输出消息的详细信息（状态码、消息头、消息体）
+- 日志信息详尽，支持打印输入、输出报文的详细信息（状态码、头信息、正文）
 - 支持设置慢操作报警阈值
 - 端点间通信使用I/O多路复用技术
 - 支持设置读取包的大小限制（如果超出则断开连接）
@@ -104,38 +114,60 @@ go get -u -f github.com/henrylee2cn/teleport
 package main
 
 import (
-    "fmt"
-    "time"
+	"fmt"
+	"time"
 
-    tp "github.com/henrylee2cn/teleport"
+	tp "github.com/henrylee2cn/teleport"
 )
 
 func main() {
-    srv := tp.NewPeer(tp.PeerConfig{
-        CountTime:  true,
-        ListenPort: 9090,
-    })
-    srv.RoutePull(new(math))
-    srv.ListenAndServe()
+	// graceful
+	go tp.GraceSignal()
+
+	// server peer
+	srv := tp.NewPeer(tp.PeerConfig{
+		CountTime:   true,
+		ListenPort:  9090,
+		PrintDetail: true,
+	})
+
+	// router
+	srv.RouteCall(new(Math))
+
+	// broadcast per 5s
+	go func() {
+		for {
+			time.Sleep(time.Second * 5)
+			srv.RangeSession(func(sess tp.Session) bool {
+				sess.Push(
+					"/push/status",
+					fmt.Sprintf("this is a broadcast, server time: %v", time.Now()),
+				)
+				return true
+			})
+		}
+	}()
+
+	// listen and serve
+	srv.ListenAndServe()
 }
 
-type math struct {
-    tp.PullCtx
+// Math handler
+type Math struct {
+	tp.CallCtx
 }
 
-func (m *math) Add(arg *[]int) (int, *tp.Rerror) {
-    if m.Query().Get("push_status") == "yes" {
-        m.Session().Push(
-            "/push/status",
-            fmt.Sprintf("%d numbers are being added...", len(*arg)),
-        )
-        time.Sleep(time.Millisecond * 10)
-    }
-    var r int
-    for _, a := range *arg {
-        r += a
-    }
-    return r, nil
+// Add handles addition request
+func (m *Math) Add(arg *[]int) (int, *tp.Rerror) {
+	// test query parameter
+	tp.Infof("author: %s", m.Query().Get("author"))
+	// add
+	var r int
+	for _, a := range *arg {
+		r += a
+	}
+	// response
+	return r, nil
 }
 ```
 
@@ -145,38 +177,48 @@ func (m *math) Add(arg *[]int) (int, *tp.Rerror) {
 package main
 
 import (
-    tp "github.com/henrylee2cn/teleport"
+	"time"
+
+	tp "github.com/henrylee2cn/teleport"
 )
 
 func main() {
-    tp.SetLoggerLevel("ERROR")
-    cli := tp.NewPeer(tp.PeerConfig{})
-    defer cli.Close()
-    cli.RoutePush(new(push))
-    sess, err := cli.Dial(":9090")
-    if err != nil {
-        tp.Fatalf("%v", err)
-    }
+	// log level
+	tp.SetLoggerLevel("ERROR")
 
-    var result int
-    rerr := sess.Pull("/math/add?push_status=yes",
-        []int{1, 2, 3, 4, 5},
-        &result,
-    ).Rerror()
+	cli := tp.NewPeer(tp.PeerConfig{})
+	defer cli.Close()
 
-    if rerr != nil {
-        tp.Fatalf("%v", rerr)
-    }
-    tp.Printf("result: %d", result)
+	cli.RoutePush(new(Push))
+
+	sess, err := cli.Dial(":9090")
+	if err != nil {
+		tp.Fatalf("%v", err)
+	}
+
+	var result int
+	rerr := sess.Call("/math/add?author=henrylee2cn",
+		[]int{1, 2, 3, 4, 5},
+		&result,
+	).Rerror()
+	if rerr != nil {
+		tp.Fatalf("%v", rerr)
+	}
+	tp.Printf("result: %d", result)
+
+	tp.Printf("wait for 10s...")
+	time.Sleep(time.Second * 10)
 }
 
-type push struct {
-    tp.PushCtx
+// Push push handler
+type Push struct {
+	tp.PushCtx
 }
 
-func (p *push) Status(arg *string) *tp.Rerror {
-    tp.Printf("server status: %s", *arg)
-    return nil
+// Push handles '/push/status' message
+func (p *Push) Status(arg *string) *tp.Rerror {
+	tp.Printf("%s", *arg)
+	return nil
 }
 ```
 
@@ -197,127 +239,19 @@ func (p *push) Status(arg *string) *tp.Rerror {
 - **Plugin：** 贯穿于通信各个环节的插件
 - **Session：** 基于Socket封装的连接会话，提供的推、拉、回复、关闭等会话操作
 - **Context：** 连接会话中一次通信（如PULL-REPLY, PUSH）的上下文对象
-- **Pull-Launch：** 从对端Peer拉数据
-- **Pull-Handle：** 处理和回复对端Peer的拉请求
+- **Call-Launch：** 从对端Peer拉数据
+- **Call-Handle：** 处理和回复对端Peer的拉请求
 - **Push-Launch：** 将数据推送到对端Peer
 - **Push-Handle：** 处理同伴的推送
 - **Router：** 通过请求信息（如URI）索引响应函数（Handler）的路由器
 
 
-### 数据包内容
+### 数据报文
 
-每个数据包的内容如下:
+抽象应用层的数据报文（Message 对象）并与 HTTP 报文兼容：
 
-```go
-// in .../teleport/socket package
+![tp_data_message](https://github.com/henrylee2cn/teleport/raw/v4/doc/tp_data_message.png)
 
-// Message a socket message data.
-type Message struct {
-    // Has unexported fields.
-}
-
-func GetMessage(settings ...MessageSetting) *Message
-func NewMessage(settings ...MessageSetting) *Message
-func (m *Message) Body() interface{}
-func (m *Message) BodyCodec() byte
-func (m *Message) Context() context.Context
-func (m *Message) MarshalBody() ([]byte, error)
-func (m *Message) Meta() *utils.Args
-func (m *Message) Mtype() byte
-func (m *Message) Reset(settings ...MessageSetting)
-func (m *Message) Seq() string
-func (m *Message) SetBody(body interface{})
-func (m *Message) SetBodyCodec(bodyCodec byte)
-func (m *Message) SetNewBody(newBodyFunc NewBodyFunc)
-func (m *Message) SetMtype(mtype byte)
-func (m *Message) SetSeq(seq string)
-func (m *Message) SetSize(size uint32) error
-func (m *Message) SetUri(uri string)
-func (m *Message) SetUriObject(uriObject *url.URL)
-func (m *Message) Size() uint32
-func (m *Message) String() string
-func (m *Message) UnmarshalBody(bodyBytes []byte) error
-func (m *Message) Uri() string
-func (m *Message) UriObject() *url.URL
-func (m *Message) XferPipe() *xfer.XferPipe
-
-// NewBodyFunc creates a new body by header.
-type NewBodyFunc func(Header) interface{}
-```
-
-### 编解码器
-
-数据包中Body内容的编解码器。
-
-```go
-type Codec interface {
-    // Id returns codec id.
-    Id() byte
-    // Name returns codec name.
-    Name() string
-    // Marshal returns the encoding of v.
-    Marshal(v interface{}) ([]byte, error)
-    // Unmarshal parses the encoded data and stores the result
-    // in the value pointed to by v.
-    Unmarshal(data []byte, v interface{}) error
-}
-```
-
-### 过滤管道
-
-传输数据的过滤管道。
-```go
-// XferFilter handles byte stream of message when transfer.
-type XferFilter interface {
-    // Id returns transfer filter id.
-    Id() byte
-    // Name returns transfer filter name.
-    Name() string
-    // OnPack performs filtering on packing.
-    OnPack([]byte) ([]byte, error)
-    // OnUnpack performs filtering on unpacking.
-    OnUnpack([]byte) ([]byte, error)
-}
-// Get returns transfer filter by id.
-func Get(id byte) (XferFilter, error)
-// GetByName returns transfer filter by name.
-func GetByName(name string) (XferFilter, error)
-
-// XferPipe transfer filter pipe, handlers from outer-most to inner-most.
-// Note: the length can not be bigger than 255!
-type XferPipe struct {
-    // Has unexported fields.
-}
-func NewXferPipe() *XferPipe
-func (x *XferPipe) Append(filterId ...byte) error
-func (x *XferPipe) AppendFrom(src *XferPipe)
-func (x *XferPipe) Ids() []byte
-func (x *XferPipe) Len() int
-func (x *XferPipe) Names() []string
-func (x *XferPipe) OnPack(data []byte) ([]byte, error)
-func (x *XferPipe) OnUnpack(data []byte) ([]byte, error)
-func (x *XferPipe) Range(callback func(idx int, filter XferFilter) bool)
-func (x *XferPipe) Reset()
-```
-
-### 插件
-
-运行过程中以挂载方式执行的插件。
-
-```go
-type (
-    // Plugin plugin background
-    Plugin interface {
-        Name() string
-    }
-    // PreNewPeerPlugin is executed before creating peer.
-    PreNewPeerPlugin interface {
-        Plugin
-        PreNewPeer(*PeerConfig, *PluginContainer) error
-    }
-    ...
-)
-```
 
 ### 通信协议
 
@@ -363,15 +297,92 @@ type Peer interface {
 {1 byte transfer pipe length}
 {transfer pipe IDs}
 # The following is handled data by transfer pipe
-{4 bytes sequence length}
+{2 bytes sequence length}
 {sequence}
 {1 byte message type} // e.g. PULL:1; REPLY:2; PUSH:3
-{4 bytes URI length}
+{2 bytes URI length}
 {URI}
-{4 bytes metadata length}
+{2 bytes metadata length}
 {metadata(urlencoded)}
 {1 byte body codec id}
 {body}
+```
+
+
+### 过滤管道
+
+传输数据的过滤管道。
+```go
+// XferFilter handles byte stream of message when transfer.
+type XferFilter interface {
+    // Id returns transfer filter id.
+    Id() byte
+    // Name returns transfer filter name.
+    Name() string
+    // OnPack performs filtering on packing.
+    OnPack([]byte) ([]byte, error)
+    // OnUnpack performs filtering on unpacking.
+    OnUnpack([]byte) ([]byte, error)
+}
+// Get returns transfer filter by id.
+func Get(id byte) (XferFilter, error)
+// GetByName returns transfer filter by name.
+func GetByName(name string) (XferFilter, error)
+
+// XferPipe transfer filter pipe, handlers from outer-most to inner-most.
+// Note: the length can not be bigger than 255!
+type XferPipe struct {
+    // Has unexported fields.
+}
+func NewXferPipe() *XferPipe
+func (x *XferPipe) Append(filterId ...byte) error
+func (x *XferPipe) AppendFrom(src *XferPipe)
+func (x *XferPipe) Ids() []byte
+func (x *XferPipe) Len() int
+func (x *XferPipe) Names() []string
+func (x *XferPipe) OnPack(data []byte) ([]byte, error)
+func (x *XferPipe) OnUnpack(data []byte) ([]byte, error)
+func (x *XferPipe) Range(callback func(idx int, filter XferFilter) bool)
+func (x *XferPipe) Reset()
+```
+
+
+### 编解码器
+
+数据包中Body内容的编解码器。
+
+```go
+type Codec interface {
+    // Id returns codec id.
+    Id() byte
+    // Name returns codec name.
+    Name() string
+    // Marshal returns the encoding of v.
+    Marshal(v interface{}) ([]byte, error)
+    // Unmarshal parses the encoded data and stores the result
+    // in the value pointed to by v.
+    Unmarshal(data []byte, v interface{}) error
+}
+```
+
+
+### 插件
+
+运行过程中以挂载方式执行的插件。
+
+```go
+type (
+    // Plugin plugin background
+    Plugin interface {
+        Name() string
+    }
+    // PreNewPeerPlugin is executed before creating peer.
+    PreNewPeerPlugin interface {
+        Plugin
+        PreNewPeer(*PeerConfig, *PluginContainer) error
+    }
+    ...
+)
 ```
 
 
@@ -394,11 +405,11 @@ var sess, err = peer2.Dial("127.0.0.1:8080")
 ```
 
 
-### Pull-Controller-Struct 接口模板
+### Call-Controller-Struct 接口模板
 
 ```go
 type Aaa struct {
-    tp.PullCtx
+    tp.CallCtx
 }
 func (x *Aaa) XxZz(arg *<T>) (<T>, *tp.Rerror) {
     ...
@@ -410,16 +421,16 @@ func (x *Aaa) XxZz(arg *<T>) (<T>, *tp.Rerror) {
 
 ```go
 // register the pull route: /aaa/xx_zz
-peer.RoutePull(new(Aaa))
+peer.RouteCall(new(Aaa))
 
 // or register the pull route: /xx_zz
-peer.RoutePullFunc((*Aaa).XxZz)
+peer.RouteCallFunc((*Aaa).XxZz)
 ```
 
-### Pull-Handler-Function 接口模板
+### Call-Handler-Function 接口模板
 
 ```go
-func XxZz(ctx tp.PullCtx, arg *<T>) (<T>, *tp.Rerror) {
+func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Rerror) {
     ...
     return r, nil
 }
@@ -429,7 +440,7 @@ func XxZz(ctx tp.PullCtx, arg *<T>) (<T>, *tp.Rerror) {
 
 ```go
 // register the pull route: /xx_zz
-peer.RoutePullFunc(XxZz)
+peer.RouteCallFunc(XxZz)
 ```
 
 ### Push-Controller-Struct 接口模板
@@ -471,10 +482,10 @@ func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Rerror {
 peer.RoutePushFunc(YyZz)
 ```
 
-### Unknown-Pull-Handler-Function 接口模板
+### Unknown-Call-Handler-Function 接口模板
 
 ```go
-func XxxUnknownPull (ctx tp.UnknownPullCtx) (interface{}, *tp.Rerror) {
+func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Rerror) {
     ...
     return r, nil
 }
@@ -484,7 +495,7 @@ func XxxUnknownPull (ctx tp.UnknownPullCtx) (interface{}, *tp.Rerror) {
 
 ```go
 // register the unknown pull route: /*
-peer.SetUnknownPull(XxxUnknownPull)
+peer.SetUnknownCall(XxxUnknownCall)
 ```
 
 ### Unknown-Push-Handler-Function 接口模板
@@ -525,7 +536,7 @@ func NewIgnoreCase() *ignoreCase {
 type ignoreCase struct{}
 
 var (
-    _ tp.PostReadPullHeaderPlugin = new(ignoreCase)
+    _ tp.PostReadCallHeaderPlugin = new(ignoreCase)
     _ tp.PostReadPushHeaderPlugin = new(ignoreCase)
 )
 
@@ -533,7 +544,7 @@ func (i *ignoreCase) Name() string {
     return "ignoreCase"
 }
 
-func (i *ignoreCase) PostReadPullHeader(ctx tp.ReadCtx) *tp.Rerror {
+func (i *ignoreCase) PostReadCallHeader(ctx tp.ReadCtx) *tp.Rerror {
     // Dynamic transformation path is lowercase
     ctx.UriObject().Path = strings.ToLower(ctx.UriObject().Path)
     return nil
@@ -552,11 +563,11 @@ func (i *ignoreCase) PostReadPushHeader(ctx tp.ReadCtx) *tp.Rerror {
 // add router group
 group := peer.SubRoute("test")
 // register to test group
-group.RoutePull(new(Aaa), NewIgnoreCase())
-peer.RoutePullFunc(XxZz, NewIgnoreCase())
+group.RouteCall(new(Aaa), NewIgnoreCase())
+peer.RouteCallFunc(XxZz, NewIgnoreCase())
 group.RoutePush(new(Bbb))
 peer.RoutePushFunc(YyZz)
-peer.SetUnknownPull(XxxUnknownPull)
+peer.SetUnknownCall(XxxUnknownCall)
 peer.SetUnknownPush(XxxUnknownPush)
 ```
 
@@ -580,7 +591,7 @@ type PeerConfig struct {
 
 ### 通信优化
 
-- SetMessageSizeLimit 设置消息包大小的上限，
+- SetMessageSizeLimit 设置报文大小的上限，
   如果 maxSize<=0，上限默认为最大 uint32
 
     ```go

@@ -11,7 +11,6 @@ import (
 
 	proto "github.com/gogo/protobuf/proto"
 	tp "github.com/henrylee2cn/teleport"
-	"github.com/henrylee2cn/teleport/proto/pbproto"
 	"github.com/montanaflynn/stats"
 )
 
@@ -32,7 +31,6 @@ func main() {
 
 	log.Printf("concurrency: %d\nrequests per client: %d\n\n", n, m)
 
-	tp.SetDefaultProtoFunc(pbproto.NewPbProtoFunc)
 	tp.SetLoggerLevel("ERROR")
 	tp.SetGopool(1024*1024*100, time.Minute*10)
 

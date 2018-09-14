@@ -13,7 +13,7 @@ It can be used for peer-peer, rpc, gateway, micro services, push services, game 
 
 ## Benchmark
 
-**Test Case**
+**Self Test**
 
 - A server and a client process, running on the same machine
 - CPU:    Intel Xeon E312xx (Sandy Bridge) 16 cores 2.53GHz
@@ -23,8 +23,6 @@ It can be used for peer-peer, rpc, gateway, micro services, push services, game 
 - Message size: 581 bytes
 - Message codec: protobuf
 - Sent total 1000000 messages
-
-**Test Results**
 
 - teleport
 
@@ -46,7 +44,19 @@ It can be used for peer-peer, rpc, gateway, micro services, push services, game 
 | 2000               | 8        | 6          | 64      | 0       | 183351          |
 | 5000               | 21       | 18         | 651     | 0       | 133886          |
 
-**[test code](https://github.com/henrylee2cn/rpc-benchmark/tree/v4/teleport)**
+**Comparison Test**
+
+<table>
+<tr><th>Environment</th><th>Throughputs</th><th>Mean Latency</th><th>P99 Latency</th></tr>
+<tr>
+<td width="10%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/env.png"></td>
+<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/throughput.png"></td>
+<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/mean_latency.png"></td>
+<td width="30%"><img src="https://github.com/henrylee2cn/rpc-benchmark/raw/master/result/p99_latency.png"></td>
+</tr>
+</table>
+
+**[More Detail](https://github.com/henrylee2cn/rpc-benchmark)**
 
 - Profile torch of teleport/socket
 
@@ -105,38 +115,60 @@ go get -u -f github.com/henrylee2cn/teleport
 package main
 
 import (
-    "fmt"
-    "time"
+	"fmt"
+	"time"
 
-    tp "github.com/henrylee2cn/teleport"
+	tp "github.com/henrylee2cn/teleport"
 )
 
 func main() {
-    srv := tp.NewPeer(tp.PeerConfig{
-        CountTime:  true,
-        ListenPort: 9090,
-    })
-    srv.RouteCall(new(math))
-    srv.ListenAndServe()
+	// graceful
+	go tp.GraceSignal()
+
+	// server peer
+	srv := tp.NewPeer(tp.PeerConfig{
+		CountTime:   true,
+		ListenPort:  9090,
+		PrintDetail: true,
+	})
+
+	// router
+	srv.RouteCall(new(Math))
+
+	// broadcast per 5s
+	go func() {
+		for {
+			time.Sleep(time.Second * 5)
+			srv.RangeSession(func(sess tp.Session) bool {
+				sess.Push(
+					"/push/status",
+					fmt.Sprintf("this is a broadcast, server time: %v", time.Now()),
+				)
+				return true
+			})
+		}
+	}()
+
+	// listen and serve
+	srv.ListenAndServe()
 }
 
-type math struct {
-    tp.CallCtx
+// Math handler
+type Math struct {
+	tp.CallCtx
 }
 
-func (m *math) Add(arg *[]int) (int, *tp.Rerror) {
-    if m.Query().Get("push_status") == "yes" {
-        m.Session().Push(
-            "/push/status",
-            fmt.Sprintf("%d numbers are being added...", len(*arg)),
-        )
-        time.Sleep(time.Millisecond * 10)
-    }
-    var r int
-    for _, a := range *arg {
-        r += a
-    }
-    return r, nil
+// Add handles addition request
+func (m *Math) Add(arg *[]int) (int, *tp.Rerror) {
+	// test query parameter
+	tp.Infof("author: %s", m.Query().Get("author"))
+	// add
+	var r int
+	for _, a := range *arg {
+		r += a
+	}
+	// response
+	return r, nil
 }
 ```
 
@@ -146,38 +178,48 @@ func (m *math) Add(arg *[]int) (int, *tp.Rerror) {
 package main
 
 import (
-    tp "github.com/henrylee2cn/teleport"
+	"time"
+
+	tp "github.com/henrylee2cn/teleport"
 )
 
 func main() {
-    tp.SetLoggerLevel("ERROR")
-    cli := tp.NewPeer(tp.PeerConfig{})
-    defer cli.Close()
-    cli.RoutePush(new(push))
-    sess, err := cli.Dial(":9090")
-    if err != nil {
-        tp.Fatalf("%v", err)
-    }
+	// log level
+	tp.SetLoggerLevel("ERROR")
 
-    var result int
-    rerr := sess.Call("/math/add?push_status=yes",
-        []int{1, 2, 3, 4, 5},
-        &result,
-    ).Rerror()
+	cli := tp.NewPeer(tp.PeerConfig{})
+	defer cli.Close()
 
-    if rerr != nil {
-        tp.Fatalf("%v", rerr)
-    }
-    tp.Printf("result: %d", result)
+	cli.RoutePush(new(Push))
+
+	sess, err := cli.Dial(":9090")
+	if err != nil {
+		tp.Fatalf("%v", err)
+	}
+
+	var result int
+	rerr := sess.Call("/math/add?author=henrylee2cn",
+		[]int{1, 2, 3, 4, 5},
+		&result,
+	).Rerror()
+	if rerr != nil {
+		tp.Fatalf("%v", rerr)
+	}
+	tp.Printf("result: %d", result)
+
+	tp.Printf("wait for 10s...")
+	time.Sleep(time.Second * 10)
 }
 
-type push struct {
-    tp.PushCtx
+// Push push handler
+type Push struct {
+	tp.PushCtx
 }
 
-func (p *push) Status(arg *string) *tp.Rerror {
-    tp.Printf("server status: %s", *arg)
-    return nil
+// Push handles '/push/status' message
+func (p *Push) Status(arg *string) *tp.Rerror {
+	tp.Printf("%s", *arg)
+	return nil
 }
 ```
 
@@ -203,121 +245,12 @@ func (p *push) Status(arg *string) *tp.Rerror {
 - **Push-Handle:** Handle the pushing of peer
 - **Router:** Router that route the response handler by request information(such as a URI)
 
-### Message
+### Data Message
 
-The contents of every one message:
+Abstracts the data message(Message Object) of the application layer and is compatible with HTTP message:
 
-```go
-// in .../teleport/socket package
+![tp_data_message](https://github.com/henrylee2cn/teleport/raw/v4/doc/tp_data_message.png)
 
-// Message a socket message data.
-type Message struct {
-    // Has unexported fields.
-}
-
-func GetMessage(settings ...MessageSetting) *Message
-func NewMessage(settings ...MessageSetting) *Message
-func (m *Message) Body() interface{}
-func (m *Message) BodyCodec() byte
-func (m *Message) Context() context.Context
-func (m *Message) MarshalBody() ([]byte, error)
-func (m *Message) Meta() *utils.Args
-func (m *Message) Mtype() byte
-func (m *Message) Reset(settings ...MessageSetting)
-func (m *Message) Seq() string
-func (m *Message) SetBody(body interface{})
-func (m *Message) SetBodyCodec(bodyCodec byte)
-func (m *Message) SetNewBody(newBodyFunc NewBodyFunc)
-func (m *Message) SetMtype(mtype byte)
-func (m *Message) SetSeq(seq string)
-func (m *Message) SetSize(size uint32) error
-func (m *Message) SetUri(uri string)
-func (m *Message) SetUriObject(uriObject *url.URL)
-func (m *Message) Size() uint32
-func (m *Message) String() string
-func (m *Message) UnmarshalBody(bodyBytes []byte) error
-func (m *Message) Uri() string
-func (m *Message) UriObject() *url.URL
-func (m *Message) XferPipe() *xfer.XferPipe
-
-// NewBodyFunc creates a new body by header.
-type NewBodyFunc func(Header) interface{}
-```
-
-### Codec
-
-The body's codec set.
-
-```go
-type Codec interface {
-    // Id returns codec id.
-    Id() byte
-    // Name returns codec name.
-    Name() string
-    // Marshal returns the encoding of v.
-    Marshal(v interface{}) ([]byte, error)
-    // Unmarshal parses the encoded data and stores the result
-    // in the value pointed to by v.
-    Unmarshal(data []byte, v interface{}) error
-}
-```
-
-### XferPipe
-
-Transfer filter pipe, handles byte stream of message when transfer.
-
-```go
-// XferFilter handles byte stream of message when transfer.
-type XferFilter interface {
-    // Id returns transfer filter id.
-    Id() byte
-    // Name returns transfer filter name.
-    Name() string
-    // OnPack performs filtering on packing.
-    OnPack([]byte) ([]byte, error)
-    // OnUnpack performs filtering on unpacking.
-    OnUnpack([]byte) ([]byte, error)
-}
-// Get returns transfer filter by id.
-func Get(id byte) (XferFilter, error)
-// GetByName returns transfer filter by name.
-func GetByName(name string) (XferFilter, error)
-
-// XferPipe transfer filter pipe, handlers from outer-most to inner-most.
-// Note: the length can not be bigger than 255!
-type XferPipe struct {
-    // Has unexported fields.
-}
-func NewXferPipe() *XferPipe
-func (x *XferPipe) Append(filterId ...byte) error
-func (x *XferPipe) AppendFrom(src *XferPipe)
-func (x *XferPipe) Ids() []byte
-func (x *XferPipe) Len() int
-func (x *XferPipe) Names() []string
-func (x *XferPipe) OnPack(data []byte) ([]byte, error)
-func (x *XferPipe) OnUnpack(data []byte) ([]byte, error)
-func (x *XferPipe) Range(callback func(idx int, filter XferFilter) bool)
-func (x *XferPipe) Reset()
-```
-
-### Plugin
-
-Plug-ins during runtime.
-
-```go
-type (
-    // Plugin plugin background
-    Plugin interface {
-        Name() string
-    }
-    // PreNewPeerPlugin is executed before creating peer.
-    PreNewPeerPlugin interface {
-        Plugin
-        PreNewPeer(*PeerConfig, *PluginContainer) error
-    }
-    ...
-)
-```
 
 ### Protocol
 
@@ -362,15 +295,93 @@ Default protocol `RawProto`(Big Endian):
 {1 byte transfer pipe length}
 {transfer pipe IDs}
 # The following is handled data by transfer pipe
-{4 bytes sequence length}
+{2 bytes sequence length}
 {sequence}
 {1 byte message type} // e.g. CALL:1; REPLY:2; PUSH:3
-{4 bytes URI length}
+{2 bytes URI length}
 {URI}
-{4 bytes metadata length}
+{2 bytes metadata length}
 {metadata(urlencoded)}
 {1 byte body codec id}
 {body}
+```
+
+
+### XferPipe
+
+Transfer filter pipe, handles byte stream of message when transfer.
+
+```go
+// XferFilter handles byte stream of message when transfer.
+type XferFilter interface {
+    // Id returns transfer filter id.
+    Id() byte
+    // Name returns transfer filter name.
+    Name() string
+    // OnPack performs filtering on packing.
+    OnPack([]byte) ([]byte, error)
+    // OnUnpack performs filtering on unpacking.
+    OnUnpack([]byte) ([]byte, error)
+}
+// Get returns transfer filter by id.
+func Get(id byte) (XferFilter, error)
+// GetByName returns transfer filter by name.
+func GetByName(name string) (XferFilter, error)
+
+// XferPipe transfer filter pipe, handlers from outer-most to inner-most.
+// Note: the length can not be bigger than 255!
+type XferPipe struct {
+    // Has unexported fields.
+}
+func NewXferPipe() *XferPipe
+func (x *XferPipe) Append(filterId ...byte) error
+func (x *XferPipe) AppendFrom(src *XferPipe)
+func (x *XferPipe) Ids() []byte
+func (x *XferPipe) Len() int
+func (x *XferPipe) Names() []string
+func (x *XferPipe) OnPack(data []byte) ([]byte, error)
+func (x *XferPipe) OnUnpack(data []byte) ([]byte, error)
+func (x *XferPipe) Range(callback func(idx int, filter XferFilter) bool)
+func (x *XferPipe) Reset()
+```
+
+
+### Codec
+
+The body's codec set.
+
+```go
+type Codec interface {
+    // Id returns codec id.
+    Id() byte
+    // Name returns codec name.
+    Name() string
+    // Marshal returns the encoding of v.
+    Marshal(v interface{}) ([]byte, error)
+    // Unmarshal parses the encoded data and stores the result
+    // in the value pointed to by v.
+    Unmarshal(data []byte, v interface{}) error
+}
+```
+
+
+### Plugin
+
+Plug-ins during runtime.
+
+```go
+type (
+    // Plugin plugin background
+    Plugin interface {
+        Name() string
+    }
+    // PreNewPeerPlugin is executed before creating peer.
+    PreNewPeerPlugin interface {
+        Plugin
+        PreNewPeer(*PeerConfig, *PluginContainer) error
+    }
+    ...
+)
 ```
 
 
