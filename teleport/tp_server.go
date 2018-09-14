@@ -40,6 +40,7 @@ func main() {
 
 	tp.SetDefaultProtoFunc(pbproto.NewPbProtoFunc)
 	tp.SetLoggerLevel("ERROR")
+	tp.SetGopool(1024*1024*100, time.Minute*10)
 
 	// go func() {
 	// 	tp.Println(http.ListenAndServe(*debugAddr, nil))
