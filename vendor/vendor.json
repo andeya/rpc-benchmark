@@ -3,36 +3,6 @@
 	"ignore": "",
 	"package": [
 		{
-			"checksumSHA1": "3KhDEC5MM0iyN+FsLfxpnvFVeuY=",
-			"path": "github.com/davecgh/go-spew/spew",
-			"revision": "d8f796af33cc11cb798c1aaeb27a4ebc5099927d",
-			"revisionTime": "2018-08-30T19:11:22Z"
-		},
-		{
-			"checksumSHA1": "a2yC46a1qsJomgY6rb+FkTFiqmE=",
-			"path": "github.com/davecgh/go-spew/spew/testdata",
-			"revision": "d8f796af33cc11cb798c1aaeb27a4ebc5099927d",
-			"revisionTime": "2018-08-30T19:11:22Z"
-		},
-		{
-			"checksumSHA1": "2fJIc4QHz5DLsQZWvscaKLQ5Dqs=",
-			"path": "github.com/facebookgo/ensure",
-			"revision": "b4ab57deab51ee655ae4bd85281f0715a068016d",
-			"revisionTime": "2016-01-27T19:34:07Z"
-		},
-		{
-			"checksumSHA1": "vHvJA+LcJOd1VQoK24HnlrIeVmA=",
-			"path": "github.com/facebookgo/stack",
-			"revision": "751773369052141c013c6e827a71e8f35c07879c",
-			"revisionTime": "2016-02-09T18:44:15Z"
-		},
-		{
-			"checksumSHA1": "/rcA60cygz3NsLEt9+5ojFAZnZU=",
-			"path": "github.com/facebookgo/subset",
-			"revision": "8dac2c3c48703541e481feddf22975953d4ff842",
-			"revisionTime": "2015-06-12T18:29:17Z"
-		},
-		{
 			"checksumSHA1": "NyYg11chm0rHNwVbPtArR/TuBjs=",
 			"path": "github.com/henrylee2cn/cfgo",
 			"revision": "e6c3cc325b211f7f83b7dae0dd468ed454157d1a",
@@ -87,34 +57,34 @@
 			"revisionTime": "2018-08-23T14:04:45Z"
 		},
 		{
-			"checksumSHA1": "AJriih+IN4D5R0YeIfcfslP1Low=",
+			"checksumSHA1": "T0law681kz8WBPV+rMBCXaiO5XI=",
 			"path": "github.com/henrylee2cn/teleport",
-			"revision": "6ec93455b8cd780e0898c79cd3af1c99c5c05240",
-			"revisionTime": "2018-09-14T18:30:14Z"
+			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
+			"revisionTime": "2018-09-14T20:41:42Z"
 		},
 		{
 			"checksumSHA1": "EqTs1+PCv+boxwoWyZbSMyyYRJA=",
 			"path": "github.com/henrylee2cn/teleport/codec",
-			"revision": "6ec93455b8cd780e0898c79cd3af1c99c5c05240",
-			"revisionTime": "2018-09-14T18:30:14Z"
+			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
+			"revisionTime": "2018-09-14T20:41:42Z"
 		},
 		{
-			"checksumSHA1": "oCvAyYwx9wtShwXB2ll3BnXPEA8=",
+			"checksumSHA1": "ZNhLp+prvys8Gldf0XOqfVUYLdg=",
 			"path": "github.com/henrylee2cn/teleport/socket",
-			"revision": "6ec93455b8cd780e0898c79cd3af1c99c5c05240",
-			"revisionTime": "2018-09-14T18:30:14Z"
+			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
+			"revisionTime": "2018-09-14T20:41:42Z"
 		},
 		{
 			"checksumSHA1": "RxIHNrpu/Udpt1YsjTXQS/3AF5s=",
 			"path": "github.com/henrylee2cn/teleport/utils",
-			"revision": "6ec93455b8cd780e0898c79cd3af1c99c5c05240",
-			"revisionTime": "2018-09-14T18:30:14Z"
+			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
+			"revisionTime": "2018-09-14T20:41:42Z"
 		},
 		{
 			"checksumSHA1": "y0QrEcAwr8MFOOeYlqjnWpn6zbI=",
 			"path": "github.com/henrylee2cn/teleport/xfer",
-			"revision": "6ec93455b8cd780e0898c79cd3af1c99c5c05240",
-			"revisionTime": "2018-09-14T18:30:14Z"
+			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
+			"revisionTime": "2018-09-14T20:41:42Z"
 		}
 	],
 	"rootPath": "github.com/henrylee2cn/rpc-benchmark"

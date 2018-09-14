@@ -15,7 +15,6 @@
 package socket
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -66,7 +65,7 @@ func SetDefaultProtoFunc(protoFunc ProtoFunc) {
 # The following is handled data by transfer pipe
 {2 bytes sequence length}
 {sequence}
-{1 byte message type} // e.g. CALL:1; REPLY:2; PUSH:3
+{1 byte message type} # e.g. CALL:1; REPLY:2; PUSH:3
 {2 bytes URI length}
 {URI}
 {2 bytes metadata length}
@@ -87,21 +86,10 @@ type rawProto struct {
 // NewRawProtoFunc is creation function of fast socket protocol.
 // NOTE: it is the default protocol.
 var NewRawProtoFunc = func(rw io.ReadWriter) Proto {
-	var (
-		rawProtoReadBufioSize     int
-		readBufferSize, isDefault = ReadBuffer()
-	)
-	if isDefault {
-		rawProtoReadBufioSize = 1024 * 4
-	} else if readBufferSize == 0 {
-		rawProtoReadBufioSize = 1024 * 35
-	} else {
-		rawProtoReadBufioSize = readBufferSize / 2
-	}
 	return &rawProto{
 		id:   'r',
 		name: "raw",
-		r:    bufio.NewReaderSize(rw, rawProtoReadBufioSize),
+		r:    rw,
 		w:    rw,
 	}
 }
