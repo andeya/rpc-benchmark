@@ -2,8 +2,9 @@ package main
 
 import (
 	"flag"
-	// "net/http"
-	// _ "net/http/pprof"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"runtime"
 	"time"
 
@@ -29,10 +30,9 @@ func (t *Hello) Say(args *BenchmarkMessage) (*BenchmarkMessage, *tp.Rerror) {
 }
 
 var (
-	port = flag.Int64("p", 8972, "listened port")
-	// cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-	delay = flag.Duration("delay", 0, "delay to mock business processing")
-	// debugAddr  = flag.String("d", "127.0.0.1:9981", "server ip and port")
+	port      = flag.Int64("p", 8972, "listened port")
+	delay     = flag.Duration("delay", 0, "delay to mock business processing")
+	debugAddr = flag.String("d", "127.0.0.1:9981", "server ip and port")
 )
 
 func main() {
@@ -42,9 +42,9 @@ func main() {
 	tp.SetLoggerLevel("ERROR")
 	tp.SetGopool(1024*1024*100, time.Minute*10)
 
-	// go func() {
-	// 	tp.Println(http.ListenAndServe(*debugAddr, nil))
-	// }()
+	go func() {
+		log.Println(http.ListenAndServe(*debugAddr, nil))
+	}()
 
 	server := tp.NewPeer(tp.PeerConfig{
 		DefaultBodyCodec: "protobuf",

@@ -4,6 +4,8 @@ import (
 	"flag"
 	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"runtime"
 	"time"
 
@@ -27,12 +29,17 @@ func (t *Hello) Say(ctx context.Context, args *BenchmarkMessage) (reply *Benchma
 }
 
 var (
-	host  = flag.String("s", "127.0.0.1:8972", "listened ip and port")
-	delay = flag.Duration("delay", 0, "delay to mock business processing")
+	host      = flag.String("s", "127.0.0.1:8972", "listened ip and port")
+	delay     = flag.Duration("delay", 0, "delay to mock business processing")
+	debugAddr = flag.String("d", "127.0.0.1:9981", "server ip and port")
 )
 
 func main() {
 	flag.Parse()
+
+	go func() {
+		log.Println(http.ListenAndServe(*debugAddr, nil))
+	}()
 
 	lis, err := net.Listen("tcp", *host)
 	if err != nil {
