@@ -57,34 +57,34 @@
 			"revisionTime": "2018-08-23T14:04:45Z"
 		},
 		{
-			"checksumSHA1": "T0law681kz8WBPV+rMBCXaiO5XI=",
+			"checksumSHA1": "H4TnV+3E56vg5hrgSHiaMVYjw5Y=",
 			"path": "github.com/henrylee2cn/teleport",
-			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
-			"revisionTime": "2018-09-14T20:41:42Z"
+			"revision": "0cee7364555f93b8979923829a86f9cf5724716e",
+			"revisionTime": "2018-09-15T05:19:59Z"
 		},
 		{
 			"checksumSHA1": "EqTs1+PCv+boxwoWyZbSMyyYRJA=",
 			"path": "github.com/henrylee2cn/teleport/codec",
-			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
-			"revisionTime": "2018-09-14T20:41:42Z"
+			"revision": "0cee7364555f93b8979923829a86f9cf5724716e",
+			"revisionTime": "2018-09-15T05:19:59Z"
 		},
 		{
 			"checksumSHA1": "ZNhLp+prvys8Gldf0XOqfVUYLdg=",
 			"path": "github.com/henrylee2cn/teleport/socket",
-			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
-			"revisionTime": "2018-09-14T20:41:42Z"
+			"revision": "0cee7364555f93b8979923829a86f9cf5724716e",
+			"revisionTime": "2018-09-15T05:19:59Z"
 		},
 		{
-			"checksumSHA1": "RxIHNrpu/Udpt1YsjTXQS/3AF5s=",
+			"checksumSHA1": "SB9sipTmW7lSB4sai4BgyWdjXo0=",
 			"path": "github.com/henrylee2cn/teleport/utils",
-			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
-			"revisionTime": "2018-09-14T20:41:42Z"
+			"revision": "0cee7364555f93b8979923829a86f9cf5724716e",
+			"revisionTime": "2018-09-15T05:19:59Z"
 		},
 		{
 			"checksumSHA1": "y0QrEcAwr8MFOOeYlqjnWpn6zbI=",
 			"path": "github.com/henrylee2cn/teleport/xfer",
-			"revision": "e4e33bc4836aa1de3fb04300f61f59f38894a9ca",
-			"revisionTime": "2018-09-14T20:41:42Z"
+			"revision": "0cee7364555f93b8979923829a86f9cf5724716e",
+			"revisionTime": "2018-09-15T05:19:59Z"
 		}
 	],
 	"rootPath": "github.com/henrylee2cn/rpc-benchmark"
