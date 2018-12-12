@@ -15,6 +15,8 @@ import (
 	"github.com/montanaflynn/stats"
 )
 
+//go:generate go build $GOFILE benchmark.pb.go
+
 var concurrency = flag.Int("c", 1, "concurrency")
 var total = flag.Int("n", 1, "total requests for all clients")
 var host = flag.String("s", "127.0.0.1:8972", "server ip and port")
@@ -40,7 +42,7 @@ func main() {
 
 	log.Printf("concurrency: %d\nrequests per client: %d\n\n", n, m)
 
-	service := "/hello/say"
+	serviceMethod := "Hello.Say"
 	client := tp.NewPeer(tp.PeerConfig{
 		DefaultBodyCodec: "protobuf",
 	})
@@ -84,12 +86,12 @@ func main() {
 
 			//warmup
 			for j := 0; j < 5; j++ {
-				sess.Call(service, args, &reply)
+				sess.Call(serviceMethod, args, &reply)
 			}
 
 			for j := 0; j < m; j++ {
 				t := time.Now().UnixNano()
-				rerr := sess.Call(service, args, &reply).Rerror()
+				rerr := sess.Call(serviceMethod, args, &reply).Rerror()
 				t = time.Now().UnixNano() - t
 
 				d[i] = append(d[i], t)

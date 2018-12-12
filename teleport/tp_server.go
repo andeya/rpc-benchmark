@@ -11,6 +11,8 @@ import (
 	tp "github.com/henrylee2cn/teleport"
 )
 
+//go:generate go build $GOFILE benchmark.pb.go
+
 type Hello struct {
 	tp.CallCtx
 }
@@ -44,6 +46,7 @@ func main() {
 		log.Println(http.ListenAndServe(*debugAddr, nil))
 	}()
 
+	tp.SetServiceMethodMapper(tp.RPCServiceMethodMapper)
 	server := tp.NewPeer(tp.PeerConfig{
 		DefaultBodyCodec: "protobuf",
 		ListenPort:       uint16(*port),

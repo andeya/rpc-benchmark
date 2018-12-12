@@ -35,11 +35,11 @@ func NewSocketHub() *SocketHub {
 
 // Set sets a Socket.
 func (sh *SocketHub) Set(socket Socket) {
-	_socket, loaded := sh.sockets.LoadOrStore(socket.Id(), socket)
+	_socket, loaded := sh.sockets.LoadOrStore(socket.ID(), socket)
 	if !loaded {
 		return
 	}
-	sh.sockets.Store(socket.Id(), socket)
+	sh.sockets.Store(socket.ID(), socket)
 	if oldSocket := _socket.(Socket); socket != oldSocket {
 		oldSocket.Close()
 	}
@@ -74,7 +74,7 @@ func (sh *SocketHub) Random() (Socket, bool) {
 }
 
 // Len returns the length of the socket hub.
-// Note: the count implemented using sync.Map may be inaccurate.
+// NOTE: the count implemented using sync.Map may be inaccurate.
 func (sh *SocketHub) Len() int {
 	return sh.sockets.Len()
 }
@@ -84,13 +84,13 @@ func (sh *SocketHub) Delete(id string) {
 	sh.sockets.Delete(id)
 }
 
-// ChangeId changes the socket id.
-// Note: if the old id is remoteAddr, won't delete the index from socketHub.
-func (sh *SocketHub) ChangeId(newId string, socket Socket) {
-	oldId := socket.Id()
-	socket.SetId(newId)
+// ChangeID changes the socket id.
+// NOTE: if the old id is remoteAddr, won't delete the index from socketHub.
+func (sh *SocketHub) ChangeID(newID string, socket Socket) {
+	oldID := socket.ID()
+	socket.SetID(newID)
 	sh.Set(socket)
-	if oldId != socket.RemoteAddr().String() {
-		sh.Delete(oldId)
+	if oldID != socket.RemoteAddr().String() {
+		sh.Delete(oldID)
 	}
 }

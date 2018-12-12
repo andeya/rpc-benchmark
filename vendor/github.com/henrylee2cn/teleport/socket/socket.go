@@ -19,7 +19,6 @@ package socket
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -71,11 +70,11 @@ type (
 		// A zero value for t means Write will not time out.
 		SetWriteDeadline(t time.Time) error
 		// WriteMessage writes header and body to the connection.
-		// Note: must be safe for concurrent use by multiple goroutines.
-		WriteMessage(message *Message) error
+		// NOTE: must be safe for concurrent use by multiple goroutines.
+		WriteMessage(message Message) error
 		// ReadMessage reads header and body from the connection.
-		// Note: must be safe for concurrent use by multiple goroutines.
-		ReadMessage(message *Message) error
+		// NOTE: must be safe for concurrent use by multiple goroutines.
+		ReadMessage(message Message) error
 		// Read reads data from the connection.
 		// Read can be made to time out and return an Error with Timeout() == true
 		// after a fixed time limit; see SetDeadline and SetReadDeadline.
@@ -91,10 +90,10 @@ type (
 		Swap() goutil.Map
 		// SwapLen returns the amount of custom data of the socket.
 		SwapLen() int
-		// Id returns the socket id.
-		Id() string
-		// SetId sets the socket id.
-		SetId(string)
+		// ID returns the socket id.
+		ID() string
+		// SetID sets the socket id.
+		SetID(string)
 		// Reset reset net.Conn and ProtoFunc.
 		Reset(netConn net.Conn, protoFunc ...ProtoFunc)
 	}
@@ -192,10 +191,10 @@ func (s *socket) ControlFD(f func(fd uintptr)) error {
 // WriteMessage writes header and body to the connection.
 // WriteMessage can be made to time out and return an Error with Timeout() == true
 // after a fixed time limit; see SetDeadline and SetWriteDeadline.
-// Note:
+// NOTE:
 //  For the byte stream type of body, write directly, do not do any processing;
 //  Must be safe for concurrent use by multiple goroutines.
-func (s *socket) WriteMessage(message *Message) error {
+func (s *socket) WriteMessage(message Message) error {
 	s.mu.RLock()
 	protocol := s.protocol
 	s.mu.RUnlock()
@@ -207,10 +206,10 @@ func (s *socket) WriteMessage(message *Message) error {
 }
 
 // ReadMessage reads header and body from the connection.
-// Note:
+// NOTE:
 //  For the byte stream type of body, read directly, do not do any processing;
 //  Must be safe for concurrent use by multiple goroutines.
-func (s *socket) ReadMessage(message *Message) error {
+func (s *socket) ReadMessage(message Message) error {
 	s.mu.RLock()
 	protocol := s.protocol
 	s.mu.RUnlock()
@@ -233,8 +232,8 @@ func (s *socket) SwapLen() int {
 	return s.swap.Len()
 }
 
-// Id returns the socket id.
-func (s *socket) Id() string {
+// ID returns the socket id.
+func (s *socket) ID() string {
 	s.idMutex.RLock()
 	id := s.id
 	if len(id) == 0 {
@@ -244,8 +243,8 @@ func (s *socket) Id() string {
 	return id
 }
 
-// SetId sets the socket id.
-func (s *socket) SetId(id string) {
+// SetID sets the socket id.
+func (s *socket) SetID(id string) {
 	s.idMutex.Lock()
 	s.id = id
 	s.idMutex.Unlock()
@@ -254,15 +253,12 @@ func (s *socket) SetId(id string) {
 // Reset reset net.Conn and ProtoFunc.
 func (s *socket) Reset(netConn net.Conn, protoFunc ...ProtoFunc) {
 	atomic.StoreInt32(&s.curState, activeClose)
-	if s.Conn != nil {
-		s.Conn.Close()
-	}
 	s.mu.Lock()
 	s.Conn = netConn
 	s.readerWithBuffer.Discard(s.readerWithBuffer.Buffered())
 	s.readerWithBuffer.Reset(netConn)
 	s.protocol = getProto(protoFunc, s)
-	s.SetId("")
+	s.SetID("")
 	atomic.StoreInt32(&s.curState, normal)
 	s.optimize()
 	s.mu.Unlock()
@@ -360,14 +356,14 @@ var (
 
 // SetKeepAlive sets whether the operating system should send
 // keepalive messages on the connection.
-// Note: If have not called the function, the system defaults are used.
+// NOTE: If have not called the function, the system defaults are used.
 func SetKeepAlive(keepalive bool) {
 	changeKeepAlive = true
 	keepAlive = keepalive
 }
 
 // SetKeepAlivePeriod sets period between keep alives.
-// Note: if d<0, don't change the value.
+// NOTE: if d<0, don't change the value.
 func SetKeepAlivePeriod(d time.Duration) {
 	if d >= 0 {
 		keepAlivePeriod = d
@@ -378,14 +374,14 @@ func SetKeepAlivePeriod(d time.Duration) {
 
 // ReadBuffer returns the size of the operating system's
 // receive buffer associated with the connection.
-// Note: if using the system default value, bytes=-1 and isDefault=true.
+// NOTE: if using the system default value, bytes=-1 and isDefault=true.
 func ReadBuffer() (bytes int, isDefault bool) {
 	return readBuffer, readBuffer == -1
 }
 
 // SetReadBuffer sets the size of the operating system's
 // receive buffer associated with the connection.
-// Note: if bytes<0, don't change the value.
+// NOTE: if bytes<0, don't change the value.
 func SetReadBuffer(bytes int) {
 	if bytes >= 0 {
 		readBuffer = bytes
@@ -396,14 +392,14 @@ func SetReadBuffer(bytes int) {
 
 // WriteBuffer returns the size of the operating system's
 // transmit buffer associated with the connection.
-// Note: if using the system default value, bytes=-1 and isDefault=true.
+// NOTE: if using the system default value, bytes=-1 and isDefault=true.
 func WriteBuffer() (bytes int, isDefault bool) {
 	return writeBuffer, writeBuffer == -1
 }
 
 // SetWriteBuffer sets the size of the operating system's
 // transmit buffer associated with the connection.
-// Note: if bytes<0, don't change the value.
+// NOTE: if bytes<0, don't change the value.
 func SetWriteBuffer(bytes int) {
 	if bytes >= 0 {
 		writeBuffer = bytes
@@ -420,7 +416,7 @@ func SetNoDelay(_noDelay bool) {
 	noDelay = _noDelay
 }
 
-func getProto(protoFuncs []ProtoFunc, rw io.ReadWriter) Proto {
+func getProto(protoFuncs []ProtoFunc, rw IOWithReadBuffer) Proto {
 	if len(protoFuncs) > 0 && protoFuncs[0] != nil {
 		return protoFuncs[0](rw)
 	}

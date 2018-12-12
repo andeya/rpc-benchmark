@@ -40,8 +40,8 @@ func (PlainCodec) Name() string {
 	return NAME_PLAIN
 }
 
-// Id returns codec id.
-func (PlainCodec) Id() byte {
+// ID returns codec id.
+func (PlainCodec) ID() byte {
 	return ID_PLAIN
 }
 
@@ -109,7 +109,11 @@ func (PlainCodec) Unmarshal(data []byte, v interface{}) error {
 	case []byte:
 		copy(s, data)
 	case *[]byte:
-		*s = make([]byte, len(data))
+		if length := len(data); cap(*s) < length {
+			*s = make([]byte, length)
+		} else {
+			*s = (*s)[:length]
+		}
 		copy(*s, data)
 	default:
 		if !parseProperType(data, reflect.ValueOf(v)) {

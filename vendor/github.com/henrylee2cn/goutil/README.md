@@ -16,6 +16,7 @@ Common and useful utils for the Go project development.
 - [Errors](#errors) Improved errors package.
 - [Graceful](#graceful) Shutdown or reboot current process gracefully.
 - [GoPool](#gopool) Goroutines' pool
+- [HTTPBody](#httpbody) HTTP body builder
 - [ResPool](#respool) Resources' pool
 - [Workshop](#workshop) Non-blocking asynchronous multiplex resource pool
 - [Password](#password) Check password
@@ -345,6 +346,52 @@ If calling 'Go' after calling 'Stop', will no longer reuse goroutine.
     func (gp *GoPool) Stop()
     ```
 
+### HTTPBody
+
+HTTP body builder.
+
+- import it
+
+    ```go
+    "github.com/henrylee2cn/goutil/httpbody"
+    ```
+
+- NewFormBody returns form request content type and body reader.
+<br> NOTE:
+<br>  @values format: \<fieldName,[value]\>
+<br>  @files format: \<fieldName,[fileName]\>
+
+    ```go
+    func NewFormBody(values, files url.Values) (contentType string, bodyReader io.Reader, err error)
+    ```
+
+- NewFormBody2 returns form request content type and body reader.
+<br> NOTE:
+<br>  @values format: \<fieldName,[value]\>
+<br>  @files format: \<fieldName,[File]\>
+
+    ```go
+    func NewFormBody2(values url.Values, files Files) (contentType string, bodyReader io.Reader)
+    ```
+
+- NewFile creates a file for HTTP form.
+
+    ```go
+    func NewFile(name string, bodyReader io.Reader) File
+    ```
+
+- NewJSONBody returns JSON request content type and body reader.
+
+    ```go
+    NewJSONBody(v interface{}) (contentType string, bodyReader io.Reader, err error)
+    ```
+
+- NewXMLBody returns XML request content type and body reader.
+
+    ```go
+    NewXMLBody(v interface{}) (contentType string, bodyReader io.Reader, err error)
+    ```
+
 ### ResPool
 
 ResPool is a high availability/high concurrent resource pool, which automatically manages the number of resources.
@@ -620,6 +667,12 @@ Various small functions.
     func StringToBytes(s string) []byte
     ```
 
+- SpaceInOne combines multiple consecutive space characters into one.
+
+    ```go
+    func SpaceInOne(s string) string
+    ```
+
 - NewRandom creates a new padded Encoding defined by the given alphabet string.
 
     ```go
@@ -657,6 +710,12 @@ Various small functions.
 
     ```go
     func ObjectName(obj interface{}) string
+    ```
+
+- GetCallLine gets caller line information.
+
+    ```go
+    func GetCallLine(calldepth int) string 
     ```
 
 - JsQueryEscape escapes the string in javascript standard so it can be safely placed inside a URL query.
@@ -916,4 +975,22 @@ to select AES-128, AES-192, or AES-256.
 
     ```go
     func RemoveAllFromInterfaces(set []interface{}, a interface{}) []interface{}
+    ```
+
+- GetFirstGopath gets the first $GOPATH value.
+
+    ```go
+    func GetFirstGopath(allowAutomaticGuessing bool) (goPath string, err error)
+    ```
+
+- TarGz compresses and archives tar.gz file.
+
+    ```go
+    func TarGz(src, dst string, includePrefix bool, logOutput func(string, ...interface{}), ignoreBaseName ...string) (err error)
+    ```
+
+- TarGzTo compresses and archives tar.gz to dst writer.
+
+    ```go
+    TarGzTo(src string, dstWriter io.Writer, includePrefix bool, logOutput func(string, ...interface{}), ignoreBaseName ...string) (err error)
     ```

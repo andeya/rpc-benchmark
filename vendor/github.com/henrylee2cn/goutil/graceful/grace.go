@@ -82,13 +82,14 @@ func Shutdown(timeout ...time.Duration) {
 			graceful = shutdown(ctxTimeout, "shutdown") && graceful
 
 			if graceful {
-				log.Infof("process are shutted down gracefully!")
+				log.Infof("process is shutted down gracefully!")
 			} else {
-				log.Infof("process are shutted down, but not gracefully!")
+				log.Infof("process is shutted down, but not gracefully!")
 			}
 		}()
 		return endCh
 	})
+	log.Flush()
 }
 
 func contextExec(timeout []time.Duration, action string, deferCallback func(ctxTimeout context.Context) <-chan struct{}) {
