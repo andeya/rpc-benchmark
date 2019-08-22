@@ -16,7 +16,6 @@ package tp
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -33,7 +32,7 @@ type (
 		// Peer returns the peer.
 		Peer() Peer
 		// Session returns the session.
-		Session() Session
+		Session() CtxSession
 		// IP returns the remote addr.
 		IP() string
 		// RealIP returns the the current real remote addr.
@@ -51,8 +50,10 @@ type (
 		PreCtx
 		// Output returns writed message.
 		Output() Message
-		// Rerror returns the handle error.
-		Rerror() *Rerror
+		// StatusOK returns the handle status is OK or not.
+		StatusOK() bool
+		// Status returns the handle status.
+		Status() *Status
 	}
 	// inputCtx common context method set.
 	inputCtx interface {
@@ -78,8 +79,10 @@ type (
 		inputCtx
 		// Input returns readed message.
 		Input() Message
-		// Rerror returns the handle error.
-		Rerror() *Rerror
+		// StatusOK returns the handle status is OK or not.
+		StatusOK() bool
+		// Status returns the handle status.
+		Status() *Status
 	}
 	// PushCtx context method set for handling the pushed message.
 	// For example:
@@ -167,7 +170,7 @@ type handlerCtx struct {
 	start           time.Time
 	cost            time.Duration
 	pluginContainer *PluginContainer
-	handleErr       *Rerror
+	stat            *Status
 	context         context.Context
 	next            *handlerCtx
 }
@@ -206,7 +209,7 @@ func (c *handlerCtx) clean() {
 	c.swap = nil
 	c.cost = 0
 	c.pluginContainer = nil
-	c.handleErr = nil
+	c.stat = nil
 	c.context = nil
 	c.input.Reset(socket.WithNewBody(c.binding))
 	c.output.Reset()
@@ -218,7 +221,7 @@ func (c *handlerCtx) Peer() Peer {
 }
 
 // Session returns the session.
-func (c *handlerCtx) Session() Session {
+func (c *handlerCtx) Session() CtxSession {
 	return c.sess
 }
 
@@ -338,16 +341,16 @@ func (c *handlerCtx) binding(header Header) (body interface{}) {
 	case TypeCall:
 		return c.bindCall(header)
 	default:
-		c.handleErr = rerrCodeMtypeNotAllowed
+		c.stat = statCodeMtypeNotAllowed
 		return nil
 	}
 }
 
-const logFormatDisconnected = "disconnected due to unsupported message type: %d\n%s %s %q\nRECV(%s)"
+const logFormatDisconnected = "disconnected due to unsupported message type: %d %s %s %q RECV(%s)"
 
 // Be executed asynchronously after readed message
 func (c *handlerCtx) handle() {
-	if c.handleErr != nil && c.handleErr.Code == CodeMtypeNotAllowed {
+	if c.stat.Code() == CodeMtypeNotAllowed {
 		goto E
 	}
 	switch c.input.Mtype() {
@@ -370,26 +373,28 @@ func (c *handlerCtx) handle() {
 	}
 E:
 	// if unsupported, disconnected.
-	rerrCodeMtypeNotAllowed.SetToMeta(c.output.Meta())
-	Errorf(logFormatDisconnected, c.input.Mtype(), c.IP(), c.input.ServiceMethod(), c.input.Seq(), messageLogBytes(c.input, c.sess.peer.printDetail))
+	c.output.SetStatus(statCodeMtypeNotAllowed)
+	Errorf(logFormatDisconnected,
+		c.input.Mtype(), c.IP(), c.input.ServiceMethod(), c.input.Seq(),
+		messageLogBytes(c.input, c.sess.peer.printDetail))
 	go c.sess.Close()
 }
 
 func (c *handlerCtx) bindPush(header Header) interface{} {
-	c.handleErr = c.pluginContainer.postReadPushHeader(c)
-	if c.handleErr != nil {
+	c.stat = c.pluginContainer.postReadPushHeader(c)
+	if !c.stat.OK() {
 		return nil
 	}
 
 	if len(header.ServiceMethod()) == 0 {
-		c.handleErr = rerrBadMessage.Copy().SetReason("invalid service method for message")
+		c.stat = statBadMessage.Copy("invalid service method for message")
 		return nil
 	}
 
 	var ok bool
 	c.handler, ok = c.sess.getPushHandler(header.ServiceMethod())
 	if !ok {
-		c.handleErr = rerrNotFound
+		c.stat = statNotFound
 		return nil
 	}
 
@@ -398,8 +403,8 @@ func (c *handlerCtx) bindPush(header Header) interface{} {
 
 	c.arg = c.handler.NewArgValue()
 	c.input.SetBody(c.arg.Interface())
-	c.handleErr = c.pluginContainer.preReadPushBody(c)
-	if c.handleErr != nil {
+	c.stat = c.pluginContainer.preReadPushBody(c)
+	if !c.stat.OK() {
 		return nil
 	}
 
@@ -412,16 +417,16 @@ func (c *handlerCtx) handlePush() {
 		ctxTimout, _ := context.WithTimeout(context.Background(), age)
 		c.setContext(ctxTimout)
 	}
-
 	defer func() {
 		if p := recover(); p != nil {
-			Debugf("panic:%v\n%s", p, goutil.PanicTrace(2))
+			Errorf("panic:%v\n%s", p, goutil.PanicTrace(2))
 		}
 		c.cost = c.sess.timeSince(c.start)
-		c.sess.printAccessLog(c.RealIP(), c.cost, c.input, nil, typePushHandle)
+		if enablePrintRunLog() {
+			c.sess.printRunLog(c.RealIP(), c.cost, c.input, nil, typePushHandle)
+		}
 	}()
-
-	if c.handleErr == nil && c.handler != nil {
+	if c.stat.OK() && c.handler != nil {
 		if c.pluginContainer.postReadPushBody(c) == nil {
 			if c.handler.isUnknown {
 				c.handler.unknownHandleFunc(c)
@@ -430,26 +435,26 @@ func (c *handlerCtx) handlePush() {
 			}
 		}
 	}
-	if c.handleErr != nil {
-		Warnf("%s", c.handleErr.String())
+	if !c.stat.OK() {
+		Warnf("%s", c.stat.String())
 	}
 }
 
 func (c *handlerCtx) bindCall(header Header) interface{} {
-	c.handleErr = c.pluginContainer.postReadCallHeader(c)
-	if c.handleErr != nil {
+	c.stat = c.pluginContainer.postReadCallHeader(c)
+	if !c.stat.OK() {
 		return nil
 	}
 
 	if len(header.ServiceMethod()) == 0 {
-		c.handleErr = rerrBadMessage.Copy().SetReason("invalid service method for message")
+		c.stat = statBadMessage.Copy("invalid service method for message")
 		return nil
 	}
 
 	var ok bool
 	c.handler, ok = c.sess.getCallHandler(header.ServiceMethod())
 	if !ok {
-		c.handleErr = rerrNotFound
+		c.stat = statNotFound
 		return nil
 	}
 
@@ -463,8 +468,8 @@ func (c *handlerCtx) bindCall(header Header) interface{} {
 		c.input.SetBody(c.arg.Interface())
 	}
 
-	c.handleErr = c.pluginContainer.preReadCallBody(c)
-	if c.handleErr != nil {
+	c.stat = c.pluginContainer.preReadCallBody(c)
+	if !c.stat.OK() {
 		return nil
 	}
 
@@ -476,16 +481,18 @@ func (c *handlerCtx) handleCall() {
 	var writed bool
 	defer func() {
 		if p := recover(); p != nil {
-			Debugf("panic:%v\n%s", p, goutil.PanicTrace(2))
+			Errorf("panic:%v\n%s", p, goutil.PanicTrace(2))
 			if !writed {
-				if c.handleErr == nil {
-					c.handleErr = rerrInternalServerError.Copy().SetReason(fmt.Sprint(p))
+				if c.stat.OK() {
+					c.stat = statInternalServerError.Copy(p)
 				}
-				c.writeReply(c.handleErr)
+				c.writeReply(c.stat)
 			}
 		}
 		c.cost = c.sess.timeSince(c.start)
-		c.sess.printAccessLog(c.RealIP(), c.cost, c.input, c.output, typeCallHandle)
+		if enablePrintRunLog() {
+			c.sess.printRunLog(c.RealIP(), c.cost, c.input, c.output, typeCallHandle)
+		}
 	}()
 
 	c.output.SetMtype(TypeReply)
@@ -499,14 +506,14 @@ func (c *handlerCtx) handleCall() {
 		socket.WithContext(ctxTimout)(c.output)
 	}
 
-	if c.handleErr == nil {
-		c.handleErr = NewRerrorFromMeta(c.output.Meta())
+	if c.stat.OK() {
+		c.stat = c.output.Status()
 	}
 
 	// handle call
-	if c.handleErr == nil {
-		c.handleErr = c.pluginContainer.postReadCallBody(c)
-		if c.handleErr == nil {
+	if c.stat.OK() {
+		c.stat = c.pluginContainer.postReadCallBody(c)
+		if c.stat.OK() {
 			if c.handler.isUnknown {
 				c.handler.unknownHandleFunc(c)
 			} else {
@@ -516,15 +523,15 @@ func (c *handlerCtx) handleCall() {
 	}
 
 	// reply call
-	c.setReplyBodyCodec(c.handleErr != nil)
+	c.setReplyBodyCodec(!c.stat.OK())
 	c.pluginContainer.preWriteReply(c)
-	rerr := c.writeReply(c.handleErr)
-	if rerr != nil {
-		if c.handleErr == nil {
-			c.handleErr = rerr
+	stat := c.writeReply(c.stat)
+	if !stat.OK() {
+		if c.stat.OK() {
+			c.stat = stat
 		}
-		if rerr != rerrConnClosed {
-			c.writeReply(rerrInternalServerError.Copy().SetReason(rerr.Reason))
+		if stat.Code() != CodeConnClosed {
+			c.writeReply(statInternalServerError.Copy(stat.Cause()))
 		}
 		return
 	}
@@ -557,17 +564,17 @@ func (c *handlerCtx) setReplyBodyCodec(hasError bool) {
 	c.ReplyBodyCodec()
 }
 
-func (c *handlerCtx) writeReply(rerr *Rerror) *Rerror {
-	if rerr != nil {
-		rerr.SetToMeta(c.output.Meta())
+func (c *handlerCtx) writeReply(stat *Status) *Status {
+	if !stat.OK() {
+		c.output.SetStatus(stat)
 		c.output.SetBody(nil)
 		c.output.SetBodyCodec(codec.NilCodecID)
 	}
 	serviceMethod := c.output.ServiceMethod()
 	c.output.SetServiceMethod("")
-	_, rerr = c.sess.write(c.output)
+	_, stat = c.sess.write(c.output)
 	c.output.SetServiceMethod(serviceMethod)
-	return rerr
+	return stat
 }
 
 func (c *handlerCtx) bindReply(header Header) interface{} {
@@ -589,14 +596,14 @@ func (c *handlerCtx) bindReply(header Header) interface{} {
 	c.setContext(c.callCmd.output.Context())
 	c.input.SetBody(c.callCmd.result)
 
-	rerr := c.pluginContainer.postReadReplyHeader(c)
-	if rerr != nil {
-		c.callCmd.rerr = rerr
+	stat := c.pluginContainer.postReadReplyHeader(c)
+	if !stat.OK() {
+		c.callCmd.stat = stat
 		return nil
 	}
-	rerr = c.pluginContainer.preReadReplyBody(c)
-	if rerr != nil {
-		c.callCmd.rerr = rerr
+	stat = c.pluginContainer.preReadReplyBody(c)
+	if !stat.OK() {
+		c.callCmd.stat = stat
 		return nil
 	}
 	return c.input.Body()
@@ -607,33 +614,37 @@ func (c *handlerCtx) handleReply() {
 	if c.callCmd == nil {
 		return
 	}
-
-	// lock: bindReply
-	defer c.callCmd.mu.Unlock()
-
 	defer func() {
 		if p := recover(); p != nil {
-			Debugf("panic:%v\n%s", p, goutil.PanicTrace(2))
+			Errorf("panic:%v\n%s", p, goutil.PanicTrace(2))
 		}
 		c.callCmd.result = c.input.Body()
-		c.handleErr = c.callCmd.rerr
+		c.stat = c.callCmd.stat
 		c.callCmd.done()
 		c.callCmd.cost = c.sess.timeSince(c.callCmd.start)
-		c.sess.printAccessLog(c.RealIP(), c.callCmd.cost, c.input, c.callCmd.output, typeCallLaunch)
+		if enablePrintRunLog() {
+			c.sess.printRunLog(c.RealIP(), c.callCmd.cost, c.input, c.callCmd.output, typeCallLaunch)
+		}
+		// lock: bindReply
+		c.callCmd.mu.Unlock()
 	}()
-	if c.callCmd.rerr != nil {
-		return
+	if c.callCmd.stat.OK() {
+		stat := c.input.Status()
+		if stat.OK() {
+			stat = c.pluginContainer.postReadReplyBody(c)
+		}
+		c.callCmd.stat = stat
 	}
-	rerr := NewRerrorFromMeta(c.input.Meta())
-	if rerr == nil {
-		rerr = c.pluginContainer.postReadReplyBody(c)
-	}
-	c.callCmd.rerr = rerr
 }
 
-// Rerror returns the handle error.
-func (c *handlerCtx) Rerror() *Rerror {
-	return c.handleErr
+// StatusOK returns the handle status is OK or not.
+func (c *handlerCtx) StatusOK() bool {
+	return c.stat.OK()
+}
+
+// Status returns the handle status.
+func (c *handlerCtx) Status() *Status {
+	return c.stat
 }
 
 // InputBodyBytes if the input body binder is []byte type, returns it, else returns nil.
@@ -668,15 +679,17 @@ type (
 		Context() context.Context
 		// Output returns writed message.
 		Output() Message
-		// Rerror returns the call error.
-		Rerror() *Rerror
+		// StatusOK returns the call status is OK or not.
+		StatusOK() bool
+		// Status returns the call status.
+		Status() *Status
 		// Done returns the chan that indicates whether it has been completed.
 		Done() <-chan struct{}
 		// Reply returns the call reply.
 		// NOTE:
 		//  Inside, <-Done() is automatically called and blocked,
 		//  until the call is completed!
-		Reply() (interface{}, *Rerror)
+		Reply() (interface{}, *Status)
 		// InputBodyCodec gets the body codec type of the input message.
 		// NOTE:
 		//  Inside, <-Done() is automatically called and blocked,
@@ -698,7 +711,7 @@ type (
 		sess           *session
 		output         Message
 		result         interface{}
-		rerr           *Rerror
+		stat           *Status
 		inputBodyCodec byte
 		inputMeta      *utils.Args
 		start          time.Time
@@ -727,11 +740,11 @@ func (c *callCmd) Peer() Peer {
 
 // TraceSession trace back the session.
 func (c *callCmd) TraceSession() (Session, bool) {
-	return c.Session(), true
+	return c.sess, true
 }
 
 // Session returns the session.
-func (c *callCmd) Session() Session {
+func (c *callCmd) Session() CtxSession {
 	return c.sess
 }
 
@@ -770,9 +783,14 @@ func (c *callCmd) Context() context.Context {
 	return c.output.Context()
 }
 
-// Rerror returns the call error.
-func (c *callCmd) Rerror() *Rerror {
-	return c.rerr
+// StatusOK returns the call status is OK or not.
+func (c *callCmd) StatusOK() bool {
+	return c.stat.OK()
+}
+
+// Status returns the call status.
+func (c *callCmd) Status() *Status {
+	return c.stat
 }
 
 // Done returns the chan that indicates whether it has been completed.
@@ -784,9 +802,9 @@ func (c *callCmd) Done() <-chan struct{} {
 // NOTE:
 //  Inside, <-Done() is automatically called and blocked,
 //  until the call is completed!
-func (c *callCmd) Reply() (interface{}, *Rerror) {
+func (c *callCmd) Reply() (interface{}, *Status) {
 	<-c.Done()
-	return c.result, c.rerr
+	return c.result, c.stat
 }
 
 // InputBodyCodec gets the body codec type of the input message.
@@ -825,9 +843,13 @@ func (c *callCmd) done() {
 	c.sess.graceCallCmdWaitGroup.Done()
 }
 
-func (c *callCmd) cancel() {
+func (c *callCmd) cancel(reason string) {
 	c.sess.callCmdMap.Delete(c.output.Seq())
-	c.rerr = rerrConnClosed
+	if reason != "" {
+		c.stat = statConnClosed.Copy(reason)
+	} else {
+		c.stat = statConnClosed
+	}
 	c.callCmdChan <- c
 	close(c.doneChan)
 	// free count call-launch

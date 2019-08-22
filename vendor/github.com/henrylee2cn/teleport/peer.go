@@ -17,12 +17,12 @@ package tp
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/henrylee2cn/teleport/quic"
 
 	"github.com/henrylee2cn/goutil"
 	"github.com/henrylee2cn/goutil/coarsetime"
@@ -41,12 +41,12 @@ type (
 		GetSession(sessionID string) (Session, bool)
 		// RangeSession ranges all sessions. If fn returns false, stop traversing.
 		RangeSession(fn func(sess Session) bool)
-		// SetTlsConfig sets the TLS config.
-		SetTlsConfig(tlsConfig *tls.Config)
-		// SetTlsConfigFromFile sets the TLS config from file.
-		SetTlsConfigFromFile(tlsCertFile, tlsKeyFile string) error
-		// TlsConfig returns the TLS config.
-		TlsConfig() *tls.Config
+		// SetTLSConfig sets the TLS config.
+		SetTLSConfig(tlsConfig *tls.Config)
+		// SetTLSConfigFromFile sets the TLS config from file.
+		SetTLSConfigFromFile(tlsCertFile, tlsKeyFile string, insecureSkipVerifyForClient ...bool) error
+		// TLSConfig returns the TLS config.
+		TLSConfig() *tls.Config
 		// PluginContainer returns the global plugin container.
 		PluginContainer() *PluginContainer
 	}
@@ -66,9 +66,9 @@ type (
 		// RoutePushFunc registers PUSH handler, and returns the path.
 		RoutePushFunc(pushHandleFunc interface{}, plugin ...Plugin) string
 		// SetUnknownCall sets the default handler, which is called when no handler for CALL is found.
-		SetUnknownCall(fn func(UnknownCallCtx) (interface{}, *Rerror), plugin ...Plugin)
+		SetUnknownCall(fn func(UnknownCallCtx) (interface{}, *Status), plugin ...Plugin)
 		// SetUnknownPush sets the default handler, which is called when no handler for PUSH is found.
-		SetUnknownPush(fn func(UnknownPushCtx) *Rerror, plugin ...Plugin)
+		SetUnknownPush(fn func(UnknownPushCtx) *Status, plugin ...Plugin)
 	}
 	// Peer the communication peer which is server or client role
 	Peer interface {
@@ -76,17 +76,12 @@ type (
 		// ListenAndServe turns on the listening service.
 		ListenAndServe(protoFunc ...ProtoFunc) error
 		// Dial connects with the peer of the destination address.
-		Dial(addr string, protoFunc ...ProtoFunc) (Session, *Rerror)
-		// DialContext connects with the peer of the destination address, using the provided context.
-		DialContext(ctx context.Context, addr string, protoFunc ...ProtoFunc) (Session, *Rerror)
+		Dial(addr string, protoFunc ...ProtoFunc) (Session, *Status)
 		// ServeConn serves the connection and returns a session.
 		// NOTE:
 		//  Not support automatically redials after disconnection;
 		//  Execute the PostAcceptPlugin plugins.
-		ServeConn(conn net.Conn, protoFunc ...ProtoFunc) (Session, error)
-		// ServeListener serves the listener.
-		// NOTE: The caller ensures that the listener supports graceful shutdown.
-		ServeListener(lis net.Listener, protoFunc ...ProtoFunc) error
+		ServeConn(conn net.Conn, protoFunc ...ProtoFunc) (Session, *Status)
 	}
 )
 
@@ -138,7 +133,7 @@ func NewPeer(cfg PeerConfig, globalLeftPlugin ...Plugin) Peer {
 	}
 
 	var p = &peer{
-		router:             newRouter("", pluginContainer),
+		router:             newRouter(pluginContainer),
 		pluginContainer:    pluginContainer,
 		sessHub:            newSessionHub(),
 		defaultSessionAge:  cfg.DefaultSessionAge,
@@ -179,20 +174,20 @@ func (p *peer) PluginContainer() *PluginContainer {
 	return p.pluginContainer
 }
 
-// TlsConfig returns the TLS config.
-func (p *peer) TlsConfig() *tls.Config {
+// TLSConfig returns the TLS config.
+func (p *peer) TLSConfig() *tls.Config {
 	return p.tlsConfig
 }
 
-// SetTlsConfig sets the TLS config.
-func (p *peer) SetTlsConfig(tlsConfig *tls.Config) {
+// SetTLSConfig sets the TLS config.
+func (p *peer) SetTLSConfig(tlsConfig *tls.Config) {
 	p.tlsConfig = tlsConfig
 }
 
-// SetTlsConfigFromFile sets the TLS config from file.
-func (p *peer) SetTlsConfigFromFile(tlsCertFile, tlsKeyFile string) error {
+// SetTLSConfigFromFile sets the TLS config from file.
+func (p *peer) SetTLSConfigFromFile(tlsCertFile, tlsKeyFile string, insecureSkipVerifyForClient ...bool) error {
 	var err error
-	p.tlsConfig, err = NewTlsConfigFromFile(tlsCertFile, tlsKeyFile)
+	p.tlsConfig, err = NewTLSConfigFromFile(tlsCertFile, tlsKeyFile, insecureSkipVerifyForClient...)
 	return err
 }
 
@@ -215,109 +210,124 @@ func (p *peer) CountSession() int {
 }
 
 // Dial connects with the peer of the destination address.
-func (p *peer) Dial(addr string, protoFunc ...ProtoFunc) (Session, *Rerror) {
+func (p *peer) Dial(addr string, protoFunc ...ProtoFunc) (Session, *Status) {
 	return p.newSessionForClient(func() (net.Conn, error) {
-		d := net.Dialer{
+		if p.network == "quic" {
+			ctx := context.Background()
+			if p.defaultDialTimeout > 0 {
+				ctx, _ = context.WithTimeout(ctx, p.defaultDialTimeout)
+			}
+			if p.tlsConfig == nil {
+				return quic.DialAddrContext(ctx, addr, &tls.Config{InsecureSkipVerify: true}, nil)
+			}
+			return quic.DialAddrContext(ctx, addr, p.tlsConfig, nil)
+		}
+		d := &net.Dialer{
 			LocalAddr: p.localAddr,
 			Timeout:   p.defaultDialTimeout,
+		}
+		if p.tlsConfig != nil {
+			return tls.DialWithDialer(d, p.network, addr, p.tlsConfig)
 		}
 		return d.Dial(p.network, addr)
 	}, addr, protoFunc)
 }
 
-// DialContext connects with the peer of the destination address,
-// using the provided context.
-func (p *peer) DialContext(ctx context.Context, addr string, protoFunc ...ProtoFunc) (Session, *Rerror) {
-	return p.newSessionForClient(func() (net.Conn, error) {
-		d := net.Dialer{
-			LocalAddr: p.localAddr,
-		}
-		return d.DialContext(ctx, p.network, addr)
-	}, addr, protoFunc)
+type redialTimes int32
+
+func (p *peer) newRedialTimes() *redialTimes {
+	r := redialTimes(p.redialTimes)
+	return &r
 }
 
-func (p *peer) newSessionForClient(dialFunc func() (net.Conn, error), addr string, protoFuncs []ProtoFunc) (*session, *Rerror) {
-	var conn net.Conn
-	var dialErr error
-	for i := p.redialTimes + 1; i > 0; i-- {
-		conn, dialErr = dialFunc()
-		if dialErr == nil {
-			break
+func (r *redialTimes) next() bool {
+	t := *r
+	if t == 0 {
+		return false
+	}
+	if t > 0 {
+		*r--
+	}
+	return true
+}
+
+func (p *peer) newSessionForClient(dialFunc func() (net.Conn, error), addr string, protoFuncs []ProtoFunc) (*session, *Status) {
+	conn, dialErr := dialFunc()
+	if dialErr != nil {
+		redialTimes := p.newRedialTimes()
+		for redialTimes.next() {
+			time.Sleep(p.redialInterval)
+			Debugf("trying to redial... (network:%s, addr:%s)", p.network, addr)
+			conn, dialErr = dialFunc()
+			if dialErr == nil {
+				break
+			}
 		}
 	}
 	if dialErr != nil {
-		rerr := rerrDialFailed.Copy().SetReason(dialErr.Error())
-		return nil, rerr
-	}
-	if p.tlsConfig != nil {
-		conn = tls.Client(conn, p.tlsConfig)
+		return nil, statDialFailed.Copy(dialErr)
 	}
 	var sess = newSession(p, conn, protoFuncs)
 
 	// create redial func
-	if p.redialTimes > 0 {
-		sess.redialForClientLocked = func(oldConn net.Conn) bool {
-			if oldConn != sess.conn {
-				return true
-			}
-			var err error
-			for i := p.redialTimes; i > 0; i-- {
+	if p.redialTimes != 0 {
+		sess.redialForClientLocked = func() bool {
+			var stat *Status
+			redialTimes := p.newRedialTimes()
+			for redialTimes.next() {
 				time.Sleep(p.redialInterval)
 				Debugf("trying to redial... (network:%s, addr:%s, id:%s)", p.network, sess.RemoteAddr().String(), sess.ID())
-				err = p.renewSessionForClient(sess, dialFunc, addr, protoFuncs)
-				if err == nil {
+				stat = p.renewSessionForClientLocked(sess, dialFunc, addr, protoFuncs)
+				if stat.OK() {
 					Infof("redial ok (network:%s, addr:%s, id:%s)", p.network, sess.RemoteAddr().String(), sess.ID())
 					return true
 				}
-				// if i > 1 {
-				// 	Warnf("redial fail (network:%s, addr:%s, id:%s): %s", p.network, sess.RemoteIP(), sess.ID(), err.Error())
-				// 	// Debug:
-				// 	time.Sleep(5e9)
-				// }
 			}
-			if err != nil {
-				Errorf("redial fail (network:%s, addr:%s, id:%s): %s", p.network, sess.RemoteAddr().String(), sess.ID(), err.Error())
+			if !stat.OK() {
+				Errorf("redial fail (network:%s, addr:%s, id:%s): %s", p.network, sess.RemoteAddr().String(), sess.ID(), stat.String())
 			}
 			return false
 		}
 	}
 
 	sess.socket.SetID(sess.LocalAddr().String())
-	if rerr := p.pluginContainer.postDial(sess); rerr != nil {
+	if stat := p.pluginContainer.postDial(sess); !stat.OK() {
 		sess.Close()
-		return nil, rerr
+		return nil, stat
 	}
+	Infof("dial ok (network:%s, addr:%s, id:%s)", p.network, sess.RemoteAddr().String(), sess.ID())
+	sess.changeStatus(statusOk)
 	AnywayGo(sess.startReadAndHandle)
 	p.sessHub.Set(sess)
-	Infof("dial ok (network:%s, addr:%s, id:%s)", p.network, sess.RemoteAddr().String(), sess.ID())
 	return sess, nil
 }
 
-func (p *peer) renewSessionForClient(sess *session, dialFunc func() (net.Conn, error), addr string, protoFuncs []ProtoFunc) error {
+func (p *peer) renewSessionForClientLocked(sess *session, dialFunc func() (net.Conn, error), addr string, protoFuncs []ProtoFunc) *Status {
 	var conn, dialErr = dialFunc()
 	if dialErr != nil {
-		return dialErr
+		return statDialFailed.Copy(dialErr)
 	}
 	if p.tlsConfig != nil {
 		conn = tls.Client(conn, p.tlsConfig)
 	}
 	oldIP := sess.LocalAddr().String()
 	oldID := sess.ID()
-	if sess.conn != nil {
-		sess.conn.Close()
+	oldConn := sess.getConn()
+	if oldConn != nil {
+		oldConn.Close()
 	}
-	sess.conn = conn
 	sess.socket.Reset(conn, protoFuncs...)
 	if oldIP == oldID {
 		sess.socket.SetID(sess.LocalAddr().String())
 	} else {
 		sess.socket.SetID(oldID)
 	}
-	if rerr := p.pluginContainer.postDial(sess); rerr != nil {
-		sess.Close()
-		return rerr.ToError()
+	sess.changeStatus(statusPreparing)
+	if stat := p.pluginContainer.postDial(sess); !stat.OK() {
+		sess.closeLocked()
+		return stat
 	}
-	atomic.StoreInt32(&sess.status, statusOk)
+	sess.changeStatus(statusOk)
 	AnywayGo(sess.startReadAndHandle)
 	p.sessHub.Set(sess)
 	return nil
@@ -327,32 +337,39 @@ func (p *peer) renewSessionForClient(sess *session, dialFunc func() (net.Conn, e
 // NOTE:
 //  Not support automatically redials after disconnection;
 //  Execute the PostAcceptPlugin plugins.
-func (p *peer) ServeConn(conn net.Conn, protoFunc ...ProtoFunc) (Session, error) {
+func (p *peer) ServeConn(conn net.Conn, protoFunc ...ProtoFunc) (Session, *Status) {
 	network := conn.LocalAddr().Network()
 	if strings.Contains(network, "udp") {
-		return nil, fmt.Errorf("invalid network: %s,\nrefer to the following: tcp, tcp4, tcp6, unix or unixpacket", network)
+		if _, ok := conn.(*quic.Conn); !ok {
+			return nil, NewStatus(CodeWrongConn, "Not support UDP", "network must be one of the following: tcp, tcp4, tcp6, unix, unixpacket or quic")
+		}
+		network = "quic"
 	}
 	var sess = newSession(p, conn, protoFunc)
-	if rerr := p.pluginContainer.postAccept(sess); rerr != nil {
+	if stat := p.pluginContainer.postAccept(sess); !stat.OK() {
 		sess.Close()
-		return nil, rerr.ToError()
+		return nil, stat
 	}
 	Infof("serve ok (network:%s, addr:%s, id:%s)", network, sess.RemoteAddr().String(), sess.ID())
-	p.sessHub.Set(sess)
+	sess.changeStatus(statusOk)
 	AnywayGo(sess.startReadAndHandle)
+	p.sessHub.Set(sess)
 	return sess, nil
 }
 
 // ErrListenClosed listener is closed error.
 var ErrListenClosed = errors.New("listener is closed")
 
-// ServeListener serves the listener.
+// serveListener serves the listener.
 // NOTE: The caller ensures that the listener supports graceful shutdown.
-func (p *peer) ServeListener(lis net.Listener, protoFunc ...ProtoFunc) error {
+func (p *peer) serveListener(lis net.Listener, protoFunc ...ProtoFunc) error {
 	defer lis.Close()
 	p.listeners[lis] = struct{}{}
 
 	network := lis.Addr().Network()
+	if _, ok := lis.(*quic.Listener); ok {
+		network = "quic"
+	}
 	addr := lis.Addr().String()
 	Printf("listen and serve (network:%s, addr:%s)", network, addr)
 
@@ -402,12 +419,13 @@ func (p *peer) ServeListener(lis net.Listener, protoFunc ...ProtoFunc) error {
 				}
 			}
 			var sess = newSession(p, conn, protoFunc)
-			if rerr := p.pluginContainer.postAccept(sess); rerr != nil {
+			if stat := p.pluginContainer.postAccept(sess); !stat.OK() {
 				sess.Close()
 				return
 			}
 			Infof("accept ok (network:%s, addr:%s, id:%s)", network, sess.RemoteAddr().String(), sess.ID())
 			p.sessHub.Set(sess)
+			sess.changeStatus(statusOk)
 			sess.startReadAndHandle()
 		})
 	}
@@ -416,13 +434,13 @@ func (p *peer) ServeListener(lis net.Listener, protoFunc ...ProtoFunc) error {
 // ListenAndServe turns on the listening service.
 func (p *peer) ListenAndServe(protoFunc ...ProtoFunc) error {
 	if len(p.listenAddr) == 0 {
-		Fatalf("listenAddress can not be empty")
+		Fatalf("listen address can not be empty")
 	}
-	lis, err := NewInheritListener(p.network, p.listenAddr, p.tlsConfig)
+	lis, err := NewInheritedListener(p.network, p.listenAddr, p.tlsConfig)
 	if err != nil {
 		Fatalf("%v", err)
 	}
-	return p.ServeListener(lis, protoFunc...)
+	return p.serveListener(lis, protoFunc...)
 }
 
 // Close closes peer.
@@ -434,7 +452,9 @@ func (p *peer) Close() (err error) {
 	}()
 	close(p.closeCh)
 	for lis := range p.listeners {
-		lis.Close()
+		if _, ok := lis.(*quic.Listener); !ok {
+			lis.Close()
+		}
 	}
 	deletePeer(p)
 	var (
@@ -454,6 +474,11 @@ func (p *peer) Close() (err error) {
 		err = errors.Merge(err, <-errCh)
 	}
 	close(errCh)
+	for lis := range p.listeners {
+		if qlis, ok := lis.(*quic.Listener); ok {
+			err = errors.Merge(err, qlis.Close())
+		}
+	}
 	return err
 }
 
@@ -514,13 +539,13 @@ func (p *peer) RoutePushFunc(pushHandleFunc interface{}, plugin ...Plugin) strin
 
 // SetUnknownCall sets the default handler,
 // which is called when no handler for CALL is found.
-func (p *peer) SetUnknownCall(fn func(UnknownCallCtx) (interface{}, *Rerror), plugin ...Plugin) {
+func (p *peer) SetUnknownCall(fn func(UnknownCallCtx) (interface{}, *Status), plugin ...Plugin) {
 	p.router.SetUnknownCall(fn, plugin...)
 }
 
 // SetUnknownPush sets the default handler,
 // which is called when no handler for PUSH is found.
-func (p *peer) SetUnknownPush(fn func(UnknownPushCtx) *Rerror, plugin ...Plugin) {
+func (p *peer) SetUnknownPush(fn func(UnknownPushCtx) *Status, plugin ...Plugin) {
 	p.router.SetUnknownPush(fn, plugin...)
 }
 

@@ -15,7 +15,6 @@
 package tp
 
 import (
-	"fmt"
 	"net"
 
 	"github.com/henrylee2cn/goutil"
@@ -31,98 +30,122 @@ type (
 	}
 	// PreNewPeerPlugin is executed before creating peer.
 	PreNewPeerPlugin interface {
+		Plugin
 		PreNewPeer(*PeerConfig, *PluginContainer) error
 	}
 	// PostNewPeerPlugin is executed after creating peer.
 	PostNewPeerPlugin interface {
+		Plugin
 		PostNewPeer(EarlyPeer) error
 	}
 	// PostRegPlugin is executed after registering handler.
 	PostRegPlugin interface {
+		Plugin
 		PostReg(*Handler) error
 	}
 	// PostListenPlugin is executed between listening and accepting.
 	PostListenPlugin interface {
+		Plugin
 		PostListen(net.Addr) error
 	}
 	// PostDialPlugin is executed after dialing.
 	PostDialPlugin interface {
-		PostDial(PreSession) *Rerror
+		Plugin
+		PostDial(PreSession) *Status
 	}
 	// PostAcceptPlugin is executed after accepting connection.
 	PostAcceptPlugin interface {
-		PostAccept(PreSession) *Rerror
+		Plugin
+		PostAccept(PreSession) *Status
 	}
 	// PreWriteCallPlugin is executed before writing CALL message.
 	PreWriteCallPlugin interface {
-		PreWriteCall(WriteCtx) *Rerror
+		Plugin
+		PreWriteCall(WriteCtx) *Status
 	}
 	// PostWriteCallPlugin is executed after successful writing CALL message.
 	PostWriteCallPlugin interface {
-		PostWriteCall(WriteCtx) *Rerror
+		Plugin
+		PostWriteCall(WriteCtx) *Status
 	}
 	// PreWriteReplyPlugin is executed before writing REPLY message.
 	PreWriteReplyPlugin interface {
-		PreWriteReply(WriteCtx) *Rerror
+		Plugin
+		PreWriteReply(WriteCtx) *Status
 	}
 	// PostWriteReplyPlugin is executed after successful writing REPLY message.
 	PostWriteReplyPlugin interface {
-		PostWriteReply(WriteCtx) *Rerror
+		Plugin
+		PostWriteReply(WriteCtx) *Status
 	}
 	// PreWritePushPlugin is executed before writing PUSH message.
 	PreWritePushPlugin interface {
-		PreWritePush(WriteCtx) *Rerror
+		Plugin
+		PreWritePush(WriteCtx) *Status
 	}
 	// PostWritePushPlugin is executed after successful writing PUSH message.
 	PostWritePushPlugin interface {
-		PostWritePush(WriteCtx) *Rerror
+		Plugin
+		PostWritePush(WriteCtx) *Status
 	}
 	// PreReadHeaderPlugin is executed before reading message header.
 	PreReadHeaderPlugin interface {
+		Plugin
 		PreReadHeader(PreCtx) error
 	}
 	// PostReadCallHeaderPlugin is executed after reading CALL message header.
 	PostReadCallHeaderPlugin interface {
-		PostReadCallHeader(ReadCtx) *Rerror
+		Plugin
+		PostReadCallHeader(ReadCtx) *Status
 	}
 	// PreReadCallBodyPlugin is executed before reading CALL message body.
 	PreReadCallBodyPlugin interface {
-		PreReadCallBody(ReadCtx) *Rerror
+		Plugin
+		PreReadCallBody(ReadCtx) *Status
 	}
 	// PostReadCallBodyPlugin is executed after reading CALL message body.
 	PostReadCallBodyPlugin interface {
-		PostReadCallBody(ReadCtx) *Rerror
+		Plugin
+		PostReadCallBody(ReadCtx) *Status
 	}
 	// PostReadPushHeaderPlugin is executed after reading PUSH message header.
 	PostReadPushHeaderPlugin interface {
-		PostReadPushHeader(ReadCtx) *Rerror
+		Plugin
+		PostReadPushHeader(ReadCtx) *Status
 	}
 	// PreReadPushBodyPlugin is executed before reading PUSH message body.
 	PreReadPushBodyPlugin interface {
-		PreReadPushBody(ReadCtx) *Rerror
+		Plugin
+		PreReadPushBody(ReadCtx) *Status
 	}
 	// PostReadPushBodyPlugin is executed after reading PUSH message body.
 	PostReadPushBodyPlugin interface {
-		PostReadPushBody(ReadCtx) *Rerror
+		Plugin
+		PostReadPushBody(ReadCtx) *Status
 	}
 	// PostReadReplyHeaderPlugin is executed after reading REPLY message header.
 	PostReadReplyHeaderPlugin interface {
-		PostReadReplyHeader(ReadCtx) *Rerror
+		Plugin
+		PostReadReplyHeader(ReadCtx) *Status
 	}
 	// PreReadReplyBodyPlugin is executed before reading REPLY message body.
 	PreReadReplyBodyPlugin interface {
-		PreReadReplyBody(ReadCtx) *Rerror
+		Plugin
+		PreReadReplyBody(ReadCtx) *Status
 	}
 	// PostReadReplyBodyPlugin is executed after reading REPLY message body.
 	PostReadReplyBodyPlugin interface {
-		PostReadReplyBody(ReadCtx) *Rerror
+		Plugin
+		PostReadReplyBody(ReadCtx) *Status
 	}
 	// PostDisconnectPlugin is executed after disconnection.
 	PostDisconnectPlugin interface {
-		PostDisconnect(BaseSession) *Rerror
+		Plugin
+		PostDisconnect(BaseSession) *Status
 	}
 )
 
+// PluginContainer a plugin container
 type PluginContainer struct {
 	*pluginSingleContainer
 	left        *pluginSingleContainer
@@ -256,7 +279,7 @@ func (p *pluginSingleContainer) GetAll() []Plugin {
 // remove removes a plugin by it's name.
 func (p *pluginSingleContainer) remove(pluginName string) error {
 	if p.plugins == nil {
-		return errors.New("no plugins are registered yet!")
+		return errors.New("no plugins are registered yet")
 	}
 	if len(pluginName) == 0 {
 		//return error: cannot delete an unamed plugin
@@ -330,20 +353,20 @@ func (p *pluginSingleContainer) postListen(addr net.Addr) {
 }
 
 // PostDial executes the defined plugins after dialing.
-func (p *pluginSingleContainer) postDial(sess PreSession) (rerr *Rerror) {
+func (p *pluginSingleContainer) postDial(sess PreSession) (stat *Status) {
 	var pluginName string
 	defer func() {
 		if p := recover(); p != nil {
 			Errorf("[PostDialPlugin:%s] network:%s, addr:%s, panic:%v\n%s", pluginName, sess.RemoteAddr().Network(), sess.RemoteAddr().String(), p, goutil.PanicTrace(2))
-			rerr = rerrDialFailed.Copy().SetReason(fmt.Sprint(p))
+			stat = statDialFailed.Copy(p)
 		}
 	}()
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostDialPlugin); ok {
 			pluginName = plugin.Name()
-			if rerr = _plugin.PostDial(sess); rerr != nil {
-				Debugf("[PostDialPlugin:%s] network:%s, addr:%s, error:%s", pluginName, sess.RemoteAddr().Network(), sess.RemoteAddr().String(), rerr.String())
-				return rerr
+			if stat = _plugin.PostDial(sess); !stat.OK() {
+				Debugf("[PostDialPlugin:%s] network:%s, addr:%s, error:%s", pluginName, sess.RemoteAddr().Network(), sess.RemoteAddr().String(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -351,20 +374,20 @@ func (p *pluginSingleContainer) postDial(sess PreSession) (rerr *Rerror) {
 }
 
 // PostAccept executes the defined plugins after accepting connection.
-func (p *pluginSingleContainer) postAccept(sess PreSession) (rerr *Rerror) {
+func (p *pluginSingleContainer) postAccept(sess PreSession) (stat *Status) {
 	var pluginName string
 	defer func() {
 		if p := recover(); p != nil {
 			Errorf("[PostAcceptPlugin:%s] network:%s, addr:%s, panic:%v\n%s", pluginName, sess.RemoteAddr().Network(), sess.RemoteAddr().String(), p, goutil.PanicTrace(2))
-			rerr = rerrInternalServerError.Copy().SetReason(fmt.Sprint(p))
+			stat = statInternalServerError.Copy(p)
 		}
 	}()
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostAcceptPlugin); ok {
 			pluginName = plugin.Name()
-			if rerr = _plugin.PostAccept(sess); rerr != nil {
-				Debugf("[PostAcceptPlugin:%s] network:%s, addr:%s, error:%s", pluginName, sess.RemoteAddr().Network(), sess.RemoteAddr().String(), rerr.String())
-				return rerr
+			if stat = _plugin.PostAccept(sess); !stat.OK() {
+				Debugf("[PostAcceptPlugin:%s] network:%s, addr:%s, error:%s", pluginName, sess.RemoteAddr().Network(), sess.RemoteAddr().String(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -372,13 +395,13 @@ func (p *pluginSingleContainer) postAccept(sess PreSession) (rerr *Rerror) {
 }
 
 // PreWriteCall executes the defined plugins before writing CALL message.
-func (p *pluginSingleContainer) preWriteCall(ctx WriteCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) preWriteCall(ctx WriteCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PreWriteCallPlugin); ok {
-			if rerr = _plugin.PreWriteCall(ctx); rerr != nil {
-				Debugf("[PreWriteCallPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PreWriteCall(ctx); !stat.OK() {
+				Debugf("[PreWriteCallPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -386,13 +409,13 @@ func (p *pluginSingleContainer) preWriteCall(ctx WriteCtx) *Rerror {
 }
 
 // PostWriteCall executes the defined plugins after successful writing CALL message.
-func (p *pluginSingleContainer) postWriteCall(ctx WriteCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postWriteCall(ctx WriteCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostWriteCallPlugin); ok {
-			if rerr = _plugin.PostWriteCall(ctx); rerr != nil {
-				Errorf("[PostWriteCallPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostWriteCall(ctx); !stat.OK() {
+				Errorf("[PostWriteCallPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -401,11 +424,11 @@ func (p *pluginSingleContainer) postWriteCall(ctx WriteCtx) *Rerror {
 
 // PreWriteReply executes the defined plugins before writing REPLY message.
 func (p *pluginSingleContainer) preWriteReply(ctx WriteCtx) {
-	var rerr *Rerror
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PreWriteReplyPlugin); ok {
-			if rerr = _plugin.PreWriteReply(ctx); rerr != nil {
-				Errorf("[PreWriteReplyPlugin:%s] %s", plugin.Name(), rerr.String())
+			if stat = _plugin.PreWriteReply(ctx); !stat.OK() {
+				Errorf("[PreWriteReplyPlugin:%s] %s", plugin.Name(), stat.String())
 				return
 			}
 		}
@@ -414,11 +437,11 @@ func (p *pluginSingleContainer) preWriteReply(ctx WriteCtx) {
 
 // PostWriteReply executes the defined plugins after successful writing REPLY message.
 func (p *pluginSingleContainer) postWriteReply(ctx WriteCtx) {
-	var rerr *Rerror
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostWriteReplyPlugin); ok {
-			if rerr = _plugin.PostWriteReply(ctx); rerr != nil {
-				Errorf("[PostWriteReplyPlugin:%s] %s", plugin.Name(), rerr.String())
+			if stat = _plugin.PostWriteReply(ctx); !stat.OK() {
+				Errorf("[PostWriteReplyPlugin:%s] %s", plugin.Name(), stat.String())
 				return
 			}
 		}
@@ -426,13 +449,13 @@ func (p *pluginSingleContainer) postWriteReply(ctx WriteCtx) {
 }
 
 // PreWritePush executes the defined plugins before writing PUSH message.
-func (p *pluginSingleContainer) preWritePush(ctx WriteCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) preWritePush(ctx WriteCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PreWritePushPlugin); ok {
-			if rerr = _plugin.PreWritePush(ctx); rerr != nil {
-				Debugf("[PreWritePushPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PreWritePush(ctx); !stat.OK() {
+				Debugf("[PreWritePushPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -440,13 +463,13 @@ func (p *pluginSingleContainer) preWritePush(ctx WriteCtx) *Rerror {
 }
 
 // PostWritePush executes the defined plugins after successful writing PUSH message.
-func (p *pluginSingleContainer) postWritePush(ctx WriteCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postWritePush(ctx WriteCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostWritePushPlugin); ok {
-			if rerr = _plugin.PostWritePush(ctx); rerr != nil {
-				Errorf("[PostWritePushPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostWritePush(ctx); !stat.OK() {
+				Errorf("[PostWritePushPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -468,13 +491,13 @@ func (p *pluginSingleContainer) preReadHeader(ctx PreCtx) error {
 }
 
 // PostReadCallHeader executes the defined plugins after reading CALL message header.
-func (p *pluginSingleContainer) postReadCallHeader(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postReadCallHeader(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostReadCallHeaderPlugin); ok {
-			if rerr = _plugin.PostReadCallHeader(ctx); rerr != nil {
-				Errorf("[PostReadCallHeaderPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostReadCallHeader(ctx); !stat.OK() {
+				Errorf("[PostReadCallHeaderPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -482,13 +505,13 @@ func (p *pluginSingleContainer) postReadCallHeader(ctx ReadCtx) *Rerror {
 }
 
 // PreReadCallBody executes the defined plugins before reading CALL message body.
-func (p *pluginSingleContainer) preReadCallBody(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) preReadCallBody(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PreReadCallBodyPlugin); ok {
-			if rerr = _plugin.PreReadCallBody(ctx); rerr != nil {
-				Errorf("[PreReadCallBodyPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PreReadCallBody(ctx); !stat.OK() {
+				Errorf("[PreReadCallBodyPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -496,13 +519,13 @@ func (p *pluginSingleContainer) preReadCallBody(ctx ReadCtx) *Rerror {
 }
 
 // PostReadCallBody executes the defined plugins after reading CALL message body.
-func (p *pluginSingleContainer) postReadCallBody(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postReadCallBody(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostReadCallBodyPlugin); ok {
-			if rerr = _plugin.PostReadCallBody(ctx); rerr != nil {
-				Errorf("[PostReadCallBodyPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostReadCallBody(ctx); !stat.OK() {
+				Errorf("[PostReadCallBodyPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -510,13 +533,13 @@ func (p *pluginSingleContainer) postReadCallBody(ctx ReadCtx) *Rerror {
 }
 
 // PostReadPushHeader executes the defined plugins after reading PUSH message header.
-func (p *pluginSingleContainer) postReadPushHeader(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postReadPushHeader(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostReadPushHeaderPlugin); ok {
-			if rerr = _plugin.PostReadPushHeader(ctx); rerr != nil {
-				Errorf("[PostReadPushHeaderPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostReadPushHeader(ctx); !stat.OK() {
+				Errorf("[PostReadPushHeaderPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -524,13 +547,13 @@ func (p *pluginSingleContainer) postReadPushHeader(ctx ReadCtx) *Rerror {
 }
 
 // PreReadPushBody executes the defined plugins before reading PUSH message body.
-func (p *pluginSingleContainer) preReadPushBody(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) preReadPushBody(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PreReadPushBodyPlugin); ok {
-			if rerr = _plugin.PreReadPushBody(ctx); rerr != nil {
-				Errorf("[PreReadPushBodyPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PreReadPushBody(ctx); !stat.OK() {
+				Errorf("[PreReadPushBodyPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -538,13 +561,13 @@ func (p *pluginSingleContainer) preReadPushBody(ctx ReadCtx) *Rerror {
 }
 
 // PostReadPushBody executes the defined plugins after reading PUSH message body.
-func (p *pluginSingleContainer) postReadPushBody(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postReadPushBody(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostReadPushBodyPlugin); ok {
-			if rerr = _plugin.PostReadPushBody(ctx); rerr != nil {
-				Errorf("[PostReadPushBodyPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostReadPushBody(ctx); !stat.OK() {
+				Errorf("[PostReadPushBodyPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -552,13 +575,13 @@ func (p *pluginSingleContainer) postReadPushBody(ctx ReadCtx) *Rerror {
 }
 
 // PostReadReplyHeader executes the defined plugins after reading REPLY message header.
-func (p *pluginSingleContainer) postReadReplyHeader(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postReadReplyHeader(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostReadReplyHeaderPlugin); ok {
-			if rerr = _plugin.PostReadReplyHeader(ctx); rerr != nil {
-				Errorf("[PostReadReplyHeaderPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostReadReplyHeader(ctx); !stat.OK() {
+				Errorf("[PostReadReplyHeaderPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -566,13 +589,13 @@ func (p *pluginSingleContainer) postReadReplyHeader(ctx ReadCtx) *Rerror {
 }
 
 // PreReadReplyBody executes the defined plugins before reading REPLY message body.
-func (p *pluginSingleContainer) preReadReplyBody(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) preReadReplyBody(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PreReadReplyBodyPlugin); ok {
-			if rerr = _plugin.PreReadReplyBody(ctx); rerr != nil {
-				Errorf("[PreReadReplyBodyPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PreReadReplyBody(ctx); !stat.OK() {
+				Errorf("[PreReadReplyBodyPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -580,13 +603,13 @@ func (p *pluginSingleContainer) preReadReplyBody(ctx ReadCtx) *Rerror {
 }
 
 // PostReadReplyBody executes the defined plugins after reading REPLY message body.
-func (p *pluginSingleContainer) postReadReplyBody(ctx ReadCtx) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postReadReplyBody(ctx ReadCtx) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostReadReplyBodyPlugin); ok {
-			if rerr = _plugin.PostReadReplyBody(ctx); rerr != nil {
-				Errorf("[PostReadReplyBodyPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostReadReplyBody(ctx); !stat.OK() {
+				Errorf("[PostReadReplyBodyPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}
@@ -594,13 +617,13 @@ func (p *pluginSingleContainer) postReadReplyBody(ctx ReadCtx) *Rerror {
 }
 
 // PostDisconnect executes the defined plugins after disconnection.
-func (p *pluginSingleContainer) postDisconnect(sess BaseSession) *Rerror {
-	var rerr *Rerror
+func (p *pluginSingleContainer) postDisconnect(sess BaseSession) *Status {
+	var stat *Status
 	for _, plugin := range p.plugins {
 		if _plugin, ok := plugin.(PostDisconnectPlugin); ok {
-			if rerr = _plugin.PostDisconnect(sess); rerr != nil {
-				Errorf("[PostDisconnectPlugin:%s] %s", plugin.Name(), rerr.String())
-				return rerr
+			if stat = _plugin.PostDisconnect(sess); !stat.OK() {
+				Errorf("[PostDisconnectPlugin:%s] %s", plugin.Name(), stat.String())
+				return stat
 			}
 		}
 	}

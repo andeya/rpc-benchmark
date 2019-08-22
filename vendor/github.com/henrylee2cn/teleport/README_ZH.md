@@ -74,6 +74,7 @@ Teleport是一个通用、高效、灵活的Socket框架。
 
 | 版本   | 状态      | 分支                                       |
 | ---- | ------- | ---------------------------------------- |
+| v6      | release | [master](https://github.com/henrylee2cn/teleport/tree/master) |
 | v5      | release | [v5](https://github.com/henrylee2cn/teleport/tree/v5) |
 | v4      | release | [v4](https://github.com/henrylee2cn/teleport/tree/v4) |
 | v3      | release | [v3](https://github.com/henrylee2cn/teleport/tree/v3) |
@@ -104,8 +105,14 @@ go get -u -f github.com/henrylee2cn/teleport
 - 支持设置读取包的大小限制（如果超出则断开连接）
 - 提供Handler的上下文
 - 客户端的Session支持断线后自动重连
-- 支持的网络类型：`tcp`、`tcp4`、`tcp6`、`unix`、`unixpacket`等
 - 提供对连接文件描述符（fd）的操作接口
+- 支持的网络类型：
+    - `tcp`
+    - `tcp4`
+    - `tcp6`
+    - `unix`
+    - `unixpacket`
+    - `quic`
 
 ## 代码示例
 
@@ -159,7 +166,7 @@ type Math struct {
 }
 
 // Add handles addition request
-func (m *Math) Add(arg *[]int) (int, *tp.Rerror) {
+func (m *Math) Add(arg *[]int) (int, *tp.Status) {
 	// test query parameter
 	tp.Infof("author: %s", m.Query().Get("author"))
 	// add
@@ -192,18 +199,18 @@ func main() {
 
 	cli.RoutePush(new(Push))
 
-	sess, err := cli.Dial(":9090")
-	if err != nil {
-		tp.Fatalf("%v", err)
+	sess, stat := cli.Dial(":9090")
+	if !stat.OK() {
+		tp.Fatalf("%v", stat)
 	}
 
 	var result int
-	rerr := sess.Call("/math/add?author=henrylee2cn",
+	stat = sess.Call("/math/add?author=henrylee2cn",
 		[]int{1, 2, 3, 4, 5},
 		&result,
-	).Rerror()
-	if rerr != nil {
-		tp.Fatalf("%v", rerr)
+	).Status()
+	if !stat.OK() {
+		tp.Fatalf("%v", stat)
 	}
 	tp.Printf("result: %d", result)
 
@@ -217,7 +224,7 @@ type Push struct {
 }
 
 // Push handles '/push/status' message
-func (p *Push) Status(arg *string) *tp.Rerror {
+func (p *Push) Status(arg *string) *tp.Status {
 	tp.Printf("%s", *arg)
 	return nil
 }
@@ -283,8 +290,8 @@ func SetDefaultProtoFunc(ProtoFunc)
 type Peer interface {
     ...
     ServeConn(conn net.Conn, protoFunc ...ProtoFunc) Session
-    DialContext(ctx context.Context, addr string, protoFunc ...ProtoFunc) (Session, *Rerror)
-    Dial(addr string, protoFunc ...ProtoFunc) (Session, *Rerror)
+    DialContext(ctx context.Context, addr string, protoFunc ...ProtoFunc) (Session, *Status)
+    Dial(addr string, protoFunc ...ProtoFunc) (Session, *Status)
     Listen(protoFunc ...ProtoFunc) error
     ...
 }
@@ -298,11 +305,11 @@ type Peer interface {
 {1 byte transfer pipe length}
 {transfer pipe IDs}
 # The following is handled data by transfer pipe
-{2 bytes sequence length}
-{sequence}
-{1 byte message type} // e.g. PULL:1; REPLY:2; PUSH:3
-{2 bytes URI length}
-{URI}
+{1 bytes sequence length}
+{sequence (HEX 36 string of int32)}
+{1 byte message type} # e.g. CALL:1; REPLY:2; PUSH:3
+{1 bytes service method length}
+{service method}
 {2 bytes metadata length}
 {metadata(urlencoded)}
 {1 byte body codec id}
@@ -405,13 +412,41 @@ var peer2 = tp.NewPeer(tp.PeerConfig{})
 var sess, err = peer2.Dial("127.0.0.1:8080")
 ```
 
-### Call-Controller-Struct 接口模版
+### 自带ServiceMethod映射规则
+
+- 结构体或方法名称到服务方法名称的默认映射（HTTPServiceMethodMapper）：
+    - `AaBb` -> `/aa_bb`
+    - `ABcXYz` -> `/abc_xyz`
+    - `Aa__Bb` -> `/aa_bb`
+    - `aa__bb` -> `/aa_bb`
+    - `ABC__XYZ` -> `/abc_xyz`
+    - `Aa_Bb` -> `/aa/bb`
+    - `aa_bb` -> `/aa/bb`
+    - `ABC_XYZ` -> `/abc/xyz`
+    ```go
+    tp.SetServiceMethodMapper(tp.HTTPServiceMethodMapper)
+    ```
+
+- 结构体或方法名称到服务方法名称的映射（RPCServiceMethodMapper）：
+    - `AaBb` -> `AaBb`
+    - `ABcXYz` -> `ABcXYz`
+    - `Aa__Bb` -> `Aa_Bb`
+    - `aa__bb` -> `aa_bb`
+    - `ABC__XYZ` -> `ABC_XYZ`
+    - `Aa_Bb` -> `Aa.Bb`
+    - `aa_bb` -> `aa.bb`
+    - `ABC_XYZ` -> `ABC.XYZ`
+    ```go
+    tp.SetServiceMethodMapper(tp.RPCServiceMethodMapper)
+    ```
+
+### Call-Struct 接口模版
 
 ```go
 type Aaa struct {
     tp.CallCtx
 }
-func (x *Aaa) XxZz(arg *<T>) (<T>, *tp.Rerror) {
+func (x *Aaa) XxZz(arg *<T>) (<T>, *tp.Status) {
     ...
     return r, nil
 }
@@ -431,10 +466,10 @@ peer.RouteCall(new(Aaa))
 peer.RouteCallFunc((*Aaa).XxZz)
 ```
 
-### Call-Handler-Function 接口模板
+### Call-Function 接口模板
 
 ```go
-func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Rerror) {
+func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Status) {
     ...
     return r, nil
 }
@@ -449,13 +484,13 @@ func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Rerror) {
 peer.RouteCallFunc(XxZz)
 ```
 
-### Push-Controller-Struct 接口模板
+### Push-Struct 接口模板
 
 ```go
 type Bbb struct {
     tp.PushCtx
 }
-func (b *Bbb) YyZz(arg *<T>) *tp.Rerror {
+func (b *Bbb) YyZz(arg *<T>) *tp.Status {
     ...
     return nil
 }
@@ -475,11 +510,11 @@ peer.RoutePush(new(Bbb))
 peer.RoutePushFunc((*Bbb).YyZz)
 ```
 
-### Push-Handler-Function 接口模板
+### Push-Function 接口模板
 
 ```go
 // YyZz register the handler
-func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Rerror {
+func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Status {
     ...
     return nil
 }
@@ -494,10 +529,10 @@ func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Rerror {
 peer.RoutePushFunc(YyZz)
 ```
 
-### Unknown-Call-Handler-Function 接口模板
+### Unknown-Call-Function 接口模板
 
 ```go
-func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Rerror) {
+func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Status) {
     ...
     return r, nil
 }
@@ -510,10 +545,10 @@ func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Rerror) {
 peer.SetUnknownCall(XxxUnknownCall)
 ```
 
-### Unknown-Push-Handler-Function 接口模板
+### Unknown-Push-Function 接口模板
 
 ```go
-func XxxUnknownPush(ctx tp.UnknownPushCtx) *tp.Rerror {
+func XxxUnknownPush(ctx tp.UnknownPushCtx) *tp.Status {
     ...
     return nil
 }
@@ -545,13 +580,13 @@ func (i *ignoreCase) Name() string {
     return "ignoreCase"
 }
 
-func (i *ignoreCase) PostReadCallHeader(ctx tp.ReadCtx) *tp.Rerror {
+func (i *ignoreCase) PostReadCallHeader(ctx tp.ReadCtx) *tp.Status {
     // Dynamic transformation path is lowercase
     ctx.UriObject().Path = strings.ToLower(ctx.UriObject().Path)
     return nil
 }
 
-func (i *ignoreCase) PostReadPushHeader(ctx tp.ReadCtx) *tp.Rerror {
+func (i *ignoreCase) PostReadPushHeader(ctx tp.ReadCtx) *tp.Status {
     // Dynamic transformation path is lowercase
     ctx.UriObject().Path = strings.ToLower(ctx.UriObject().Path)
     return nil
@@ -576,11 +611,11 @@ peer.SetUnknownPush(XxxUnknownPush)
 
 ```go
 type PeerConfig struct {
-    Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix or unixpacket"`
+    Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix, unixpacket or quic"`
     LocalIP            string        `yaml:"local_ip"             ini:"local_ip"             comment:"Local IP"`
     ListenPort         uint16        `yaml:"listen_port"          ini:"listen_port"          comment:"Listen port; for server role"`
     DefaultDialTimeout time.Duration `yaml:"default_dial_timeout" ini:"default_dial_timeout" comment:"Default maximum duration for dialing; for client role; ns,µs,ms,s,m,h"`
-    RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; for client role"`
+    RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; Unlimited when <0; for client role"`
 	RedialInterval     time.Duration `yaml:"redial_interval"      ini:"redial_interval"      comment:"Interval of redialing each time, default 100ms; for client role; ns,µs,ms,s,m,h"`
     DefaultBodyCodec   string        `yaml:"default_body_codec"   ini:"default_body_codec"   comment:"Default body codec type id"`
     DefaultSessionAge  time.Duration `yaml:"default_session_age"  ini:"default_session_age"  comment:"Default session max age, if less than or equal to 0, no time limit; ns,µs,ms,s,m,h"`
@@ -639,6 +674,8 @@ type PeerConfig struct {
 | ---------------------------------------- | ---------------------------------------- | ---------------------------- |
 | [json](https://github.com/henrylee2cn/teleport/blob/v5/codec/json_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | JSON codec(teleport own)     |
 | [protobuf](https://github.com/henrylee2cn/teleport/blob/v5/codec/protobuf_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Protobuf codec(teleport own) |
+| [thrift](https://github.com/henrylee2cn/teleport/blob/v5/codec/thrift_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
+| [xml](https://github.com/henrylee2cn/teleport/blob/v5/codec/xml_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
 | [plain](https://github.com/henrylee2cn/teleport/blob/v5/codec/plain_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Plain text codec(teleport own)   |
 | [form](https://github.com/henrylee2cn/teleport/blob/v5/codec/form_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
 
@@ -656,10 +693,11 @@ type PeerConfig struct {
 
 | package                                  | import                                   | description                              |
 | ---------------------------------------- | ---------------------------------------- | ---------------------------------------- |
-| [rawproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/rawproto) | `import "github.com/henrylee2cn/teleport/proto/rawproto` | A fast socket communication protocol(teleport default protocol) |
-| [jsonproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/jsonproto) | `import "github.com/henrylee2cn/teleport/proto/jsonproto"` | A JSON socket communication protocol     |
-| [pbproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/pbproto) | `import "github.com/henrylee2cn/teleport/proto/pbproto"` | A Protobuf socket communication protocol     |
-| [thriftproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/thriftproto) | `import "github.com/henrylee2cn/teleport/proto/thriftproto"` | A Thrift communication protocol     |
+| [rawproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/rawproto) | `import "github.com/henrylee2cn/teleport/proto/rawproto` | 一个高性能的通信协议（teleport默认）|
+| [jsonproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/jsonproto) | `import "github.com/henrylee2cn/teleport/proto/jsonproto"` | JSON 格式的通信协议     |
+| [pbproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/pbproto) | `import "github.com/henrylee2cn/teleport/proto/pbproto"` | Protobuf 格式的通信协议     |
+| [thriftproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/thriftproto) | `import "github.com/henrylee2cn/teleport/proto/thriftproto"` | Thrift 格式的通信协议     |
+| [httproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/httproto) | `import "github.com/henrylee2cn/teleport/proto/httproto"` | HTTP 格式的通信协议     |
 
 ### 传输过滤器
 
@@ -674,6 +712,7 @@ type PeerConfig struct {
 | ---------------------------------------- | ---------------------------------------- | ---------------------------------------- |
 | [multiclient](https://github.com/henrylee2cn/teleport/tree/v5/mixer/multiclient) | `import "github.com/henrylee2cn/teleport/mixer/multiclient"` | Higher throughput client connection pool when transferring large messages (such as downloading files) |
 | [websocket](https://github.com/henrylee2cn/teleport/tree/v5/mixer/websocket) | `import "github.com/henrylee2cn/teleport/mixer/websocket"` | Makes the Teleport framework compatible with websocket protocol as specified in RFC 6455 |
+| [evio](https://github.com/henrylee2cn/teleport/tree/v5/mixer/evio) | `import "github.com/henrylee2cn/teleport/mixer/evio"` | A fast event-loop networking framework that uses the teleport API layer |
 | [html](https://github.com/xiaoenai/tp-micro/tree/master/helper/mod-html) | `html "github.com/xiaoenai/tp-micro/helper/mod-html"` | HTML render for http client |
 
 ## 基于Teleport的项目
@@ -685,13 +724,14 @@ type PeerConfig struct {
 
 ## 企业用户
 
-<a href="http://www.xiaoenai.com"><img src="https://statics.xiaoenai.com/v5/img/logo_zh.png" height="50" alt="深圳市梦之舵信息技术有限公司"/></a>
+<a href="http://www.xiaoenai.com"><img src="https://raw.githubusercontent.com/henrylee2cn/imgs-repo/master/xiaoenai.png" height="50" alt="深圳市梦之舵信息技术有限公司"/></a>
 &nbsp;&nbsp;
 <a href="https://tech.pingan.com/index.html"><img src="http://pa-tech.hirede.com/templates/pa-tech/Images/logo.png" height="50" alt="平安科技"/></a>
 <br/>
 <a href="http://www.fun.tv"><img src="http://static.funshion.com/open/static/img/logo.gif" height="70" alt="北京风行在线技术有限公司"/></a>
 &nbsp;&nbsp;
 <a href="http://www.kejishidai.cn"><img src="http://simg.ktvms.com/picture/logo.png" height="70" alt="北京可即时代网络公司"/></a>
+<a href="https://www.kuaishou.com/"><img src="https://inews.gtimg.com/newsapp_bt/0/4400789257/1000" height="70" alt="快手短视频平台"/></a>
 
 ## 开源协议
 

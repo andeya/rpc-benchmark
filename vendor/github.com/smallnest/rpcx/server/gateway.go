@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/rs/cors"
 	"github.com/smallnest/rpcx/log"
 	"github.com/smallnest/rpcx/protocol"
 	"github.com/smallnest/rpcx/share"
@@ -23,13 +26,30 @@ func (s *Server) startGateway(network string, ln net.Listener) net.Listener {
 
 	m := cmux.New(ln)
 
-	httpLn := m.Match(cmux.HTTP1Fast())
-	rpcxLn := m.Match(cmux.Any())
+	rpcxLn := m.Match(rpcxPrefixByteMatcher())
 
-	go s.startHTTP1APIGateway(httpLn)
+	if !s.DisableJSONRPC {
+		jsonrpc2Ln := m.Match(cmux.HTTP1HeaderField("X-JSONRPC-2.0", "true"))
+		go s.startJSONRPC2(jsonrpc2Ln)
+	}
+
+	if !s.DisableHTTPGateway {
+		httpLn := m.Match(cmux.HTTP1Fast())
+		go s.startHTTP1APIGateway(httpLn)
+	}
+
 	go m.Serve()
 
 	return rpcxLn
+}
+
+func rpcxPrefixByteMatcher() cmux.Matcher {
+	magic := protocol.MagicNumber()
+	return func(r io.Reader) bool {
+		buf := make([]byte, 1)
+		n, _ := r.Read(buf)
+		return n == 1 && buf[0] == magic
+	}
 }
 
 func (s *Server) startHTTP1APIGateway(ln net.Listener) {
@@ -38,9 +58,19 @@ func (s *Server) startHTTP1APIGateway(ln net.Listener) {
 	router.GET("/*servicePath", s.handleGatewayRequest)
 	router.PUT("/*servicePath", s.handleGatewayRequest)
 
-	s.mu.Lock()
-	s.gatewayHTTPServer = &http.Server{Handler: router}
-	s.mu.Unlock()
+	if s.corsOptions != nil {
+		opt := cors.Options(*s.corsOptions)
+		c := cors.New(opt)
+		mux := c.Handler(router)
+		s.mu.Lock()
+		s.gatewayHTTPServer = &http.Server{Handler: mux}
+		s.mu.Unlock()
+	} else {
+		s.mu.Lock()
+		s.gatewayHTTPServer = &http.Server{Handler: router}
+		s.mu.Unlock()
+	}
+
 	if err := s.gatewayHTTPServer.Serve(ln); err != nil {
 		log.Errorf("error in gateway Serve: %s", err)
 	}
@@ -57,6 +87,13 @@ func (s *Server) closeHTTP1APIGateway(ctx context.Context) error {
 }
 
 func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	ctx := context.WithValue(r.Context(), RemoteConnContextKey, r.RemoteAddr) // notice: It is a string, different with TCP (net.Conn)
+	err := s.Plugins.DoPreReadRequest(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
 	if r.Header.Get(XServicePath) == "" {
 		servicePath := params.ByName("servicePath")
 		if strings.HasPrefix(servicePath, "/") {
@@ -65,7 +102,6 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 		r.Header.Set(XServicePath, servicePath)
 	}
 	servicePath := r.Header.Get(XServicePath)
-
 	wh := w.Header()
 	req, err := HTTPRequest2RpcxRequest(r)
 	defer protocol.FreeMsg(req)
@@ -73,9 +109,24 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 	//set headers
 	wh.Set(XVersion, r.Header.Get(XVersion))
 	wh.Set(XMessageID, r.Header.Get(XMessageID))
-	wh.Set(XServicePath, servicePath)
-	wh.Set(XServiceMethod, r.Header.Get(XServiceMethod))
-	wh.Set(XSerializeType, r.Header.Get(XSerializeType))
+
+	if err == nil && servicePath == "" {
+		err = errors.New("empty servicepath")
+	} else {
+		wh.Set(XServicePath, servicePath)
+	}
+
+	if err == nil && r.Header.Get(XServiceMethod) == "" {
+		err = errors.New("empty servicemethod")
+	} else {
+		wh.Set(XServiceMethod, r.Header.Get(XServiceMethod))
+	}
+
+	if err == nil && r.Header.Get(XSerializeType) == "" {
+		err = errors.New("empty serialized type")
+	} else {
+		wh.Set(XSerializeType, r.Header.Get(XSerializeType))
+	}
 
 	if err != nil {
 		rh := r.Header
@@ -89,8 +140,13 @@ func (s *Server) handleGatewayRequest(w http.ResponseWriter, r *http.Request, pa
 		wh.Set(XErrorMessage, err.Error())
 		return
 	}
+	err = s.Plugins.DoPostReadRequest(ctx, req, nil)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 
-	ctx := context.WithValue(context.Background(), StartRequestContextKey, time.Now().UnixNano())
+	ctx = context.WithValue(ctx, StartRequestContextKey, time.Now().UnixNano())
 	err = s.auth(ctx, req)
 	if err != nil {
 		s.Plugins.DoPreWriteResponse(ctx, req, nil)

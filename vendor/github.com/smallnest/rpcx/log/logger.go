@@ -9,7 +9,7 @@ const (
 	calldepth = 3
 )
 
-var l Logger = &defaultLogger{log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile)}
+var l Logger = &defaultLogger{log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile)}
 
 type Logger interface {
 	Debug(v ...interface{})
@@ -29,6 +29,10 @@ type Logger interface {
 
 	Panic(v ...interface{})
 	Panicf(format string, v ...interface{})
+}
+
+type Handler interface {
+	Handle(v ...interface{})
 }
 
 func SetLogger(logger Logger) {
@@ -79,4 +83,10 @@ func Panic(v ...interface{}) {
 }
 func Panicf(format string, v ...interface{}) {
 	l.Panicf(format, v...)
+}
+
+func Handle(v ...interface{}) {
+	if handle, ok := l.(Handler); ok {
+		handle.Handle(v...)
+	}
 }

@@ -96,11 +96,17 @@ type (
 		SetID(string)
 		// Reset reset net.Conn and ProtoFunc.
 		Reset(netConn net.Conn, protoFunc ...ProtoFunc)
-	}
-	// RawConn raw conn
-	RawConn interface {
 		// Raw returns the raw net.Conn
 		Raw() net.Conn
+	}
+	// UnsafeSocket has more unsafe methods than Socket interface.
+	UnsafeSocket interface {
+		Socket
+		// RawLocked returns the raw net.Conn,
+		// can be called in ProtoFunc.
+		// NOTE:
+		//  Make sure the external is locked before calling
+		RawLocked() net.Conn
 	}
 	socket struct {
 		net.Conn
@@ -121,8 +127,8 @@ const (
 )
 
 var (
-	_ net.Conn = Socket(nil)
-	_ RawConn  = (*socket)(nil)
+	_ net.Conn     = Socket(nil)
+	_ UnsafeSocket = new(socket)
 )
 
 // ErrProactivelyCloseSocket proactively close the socket error.
@@ -156,12 +162,23 @@ func newSocket(c net.Conn, protoFuncs []ProtoFunc) *socket {
 		readerWithBuffer: bufio.NewReaderSize(c, readerSize),
 	}
 	s.protocol = getProto(protoFuncs, s)
-	s.optimize()
+	s.initOptimize()
 	return s
 }
 
 // Raw returns the raw net.Conn
 func (s *socket) Raw() net.Conn {
+	s.mu.RLock()
+	conn := s.Conn
+	s.mu.RUnlock()
+	return conn
+}
+
+// RawLocked returns the raw net.Conn,
+// can be called in ProtoFunc.
+// NOTE:
+//  Make sure the external is locked before calling
+func (s *socket) RawLocked() net.Conn {
 	return s.Conn
 }
 
@@ -177,7 +194,7 @@ func (s *socket) Read(b []byte) (int, error) {
 // The file descriptor fd is guaranteed to remain valid while
 // f executes but not after f returns.
 func (s *socket) ControlFD(f func(fd uintptr)) error {
-	syscallConn, ok := s.Conn.(syscall.Conn)
+	syscallConn, ok := s.Raw().(syscall.Conn)
 	if !ok {
 		return syscall.EINVAL
 	}
@@ -260,7 +277,7 @@ func (s *socket) Reset(netConn net.Conn, protoFunc ...ProtoFunc) {
 	s.protocol = getProto(protoFunc, s)
 	s.SetID("")
 	atomic.StoreInt32(&s.curState, normal)
-	s.optimize()
+	s.initOptimize()
 	s.mu.Unlock()
 }
 
@@ -295,7 +312,7 @@ func (s *socket) isActiveClosed() bool {
 	return atomic.LoadInt32(&s.curState) == activeClose
 }
 
-func (s *socket) optimize() {
+func (s *socket) initOptimize() {
 	if c, ok := s.Conn.(ifaceSetKeepAlive); ok {
 		if changeKeepAlive {
 			c.SetKeepAlive(keepAlive)

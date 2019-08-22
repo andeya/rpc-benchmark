@@ -91,18 +91,14 @@ func main() {
 
 			for j := 0; j < m; j++ {
 				t := time.Now().UnixNano()
-				rerr := sess.Call(serviceMethod, args, &reply).Rerror()
+				stat := sess.Call(serviceMethod, args, &reply).Status()
 				t = time.Now().UnixNano() - t
 
 				d[i] = append(d[i], t)
 
-				if rerr == nil && reply.Field1 == "OK" {
+				if stat.OK() && reply.Field1 == "OK" {
 					atomic.AddUint64(&transOK, 1)
 				}
-
-				// if rerr != nil {
-				// 	log.Print(rerr.String())
-				// }
 
 				atomic.AddUint64(&trans, 1)
 				wg.Done()

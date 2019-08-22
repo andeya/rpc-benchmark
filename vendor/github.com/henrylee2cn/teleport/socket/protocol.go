@@ -66,15 +66,17 @@ func SetDefaultProtoFunc(protoFunc ProtoFunc) {
 # raw protocol format(Big Endian):
 
 {4 bytes message length}
-{1 byte protocol version}
+{1 byte protocol version} # 6
 {1 byte transfer pipe length}
 {transfer pipe IDs}
 # The following is handled data by transfer pipe
 {1 bytes sequence length}
-{sequence}
+{sequence (HEX 36 string of int32)}
 {1 byte message type} # e.g. CALL:1; REPLY:2; PUSH:3
 {1 bytes service method length}
 {service method}
+{2 bytes status length}
+{status(urlencoded)}
 {2 bytes metadata length}
 {metadata(urlencoded)}
 {1 byte body codec id}
@@ -94,7 +96,7 @@ type rawProto struct {
 // NOTE: it is the default protocol.
 var RawProtoFunc = func(rw IOWithReadBuffer) Proto {
 	return &rawProto{
-		id:   'r',
+		id:   6,
 		name: "raw",
 		r:    rw,
 		w:    rw,
@@ -172,6 +174,9 @@ func (r *rawProto) writeHeader(bb *utils.ByteBuffer, m Message) error {
 	}
 	bb.WriteByte(byte(serviceMethodLength))
 	bb.Write(serviceMethod)
+	statusBytes := m.Status(true).EncodeQuery()
+	binary.Write(bb, binary.BigEndian, uint16(len(statusBytes)))
+	bb.Write(statusBytes)
 
 	metaBytes := m.Meta().QueryString()
 	binary.Write(bb, binary.BigEndian, uint16(len(metaBytes)))
@@ -274,11 +279,18 @@ func (r *rawProto) readHeader(data []byte, m Message) ([]byte, error) {
 	m.SetServiceMethod(string(data[:serviceMethodLen]))
 	data = data[serviceMethodLen:]
 
+	// status
+	statusLen := binary.BigEndian.Uint16(data)
+	data = data[2:]
+	m.Status(true).DecodeQuery(data[:statusLen])
+	data = data[statusLen:]
+
 	// meta
 	metaLen := binary.BigEndian.Uint16(data)
 	data = data[2:]
 	m.Meta().ParseBytes(data[:metaLen])
 	data = data[metaLen:]
+
 	return data, nil
 }
 

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/henrylee2cn/cfgo"
+	"github.com/henrylee2cn/teleport/codec"
 	"github.com/henrylee2cn/teleport/socket"
 )
 
@@ -30,11 +31,11 @@ import (
 //  yaml tag is used for github.com/henrylee2cn/cfgo
 //  ini tag is used for github.com/henrylee2cn/ini
 type PeerConfig struct {
-	Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix or unixpacket"`
+	Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix, unixpacket or quic"`
 	LocalIP            string        `yaml:"local_ip"             ini:"local_ip"             comment:"Local IP"`
 	ListenPort         uint16        `yaml:"listen_port"          ini:"listen_port"          comment:"Listen port; for server role"`
 	DefaultDialTimeout time.Duration `yaml:"default_dial_timeout" ini:"default_dial_timeout" comment:"Default maximum duration for dialing; for client role; ns,µs,ms,s,m,h"`
-	RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; for client role"`
+	RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; Unlimited when <0; for client role"`
 	RedialInterval     time.Duration `yaml:"redial_interval"      ini:"redial_interval"      comment:"Interval of redialing each time, default 100ms; for client role; ns,µs,ms,s,m,h"`
 	DefaultBodyCodec   string        `yaml:"default_body_codec"   ini:"default_body_codec"   comment:"Default body codec type id"`
 	DefaultSessionAge  time.Duration `yaml:"default_session_age"  ini:"default_session_age"  comment:"Default session max age, if less than or equal to 0, no time limit; ns,µs,ms,s,m,h"`
@@ -50,6 +51,12 @@ type PeerConfig struct {
 }
 
 var _ cfgo.Config = new(PeerConfig)
+
+// ListenerAddr returns the listener address.
+func (p *PeerConfig) ListenerAddr() string {
+	p.check()
+	return p.listenAddrStr
+}
 
 // Reload Bi-directionally synchronizes config between YAML file and memory.
 func (p *PeerConfig) Reload(bind cfgo.BindFunc) error {
@@ -72,7 +79,7 @@ func (p *PeerConfig) check() error {
 	var err error
 	switch p.Network {
 	default:
-		return errors.New("Invalid network config, refer to the following: tcp, tcp4, tcp6, unix or unixpacket.")
+		return errors.New("Invalid network config, refer to the following: tcp, tcp4, tcp6, unix, unixpacket or quic")
 	case "":
 		p.Network = "tcp"
 		fallthrough
@@ -80,6 +87,8 @@ func (p *PeerConfig) check() error {
 		p.localAddr, err = net.ResolveTCPAddr(p.Network, net.JoinHostPort(p.LocalIP, "0"))
 	case "unix", "unixpacket":
 		p.localAddr, err = net.ResolveUnixAddr(p.Network, net.JoinHostPort(p.LocalIP, "0"))
+	case "quic":
+		p.localAddr, err = net.ResolveUDPAddr("udp", net.JoinHostPort(p.LocalIP, "0"))
 	}
 	if err != nil {
 		return err
@@ -90,14 +99,28 @@ func (p *PeerConfig) check() error {
 		p.slowCometDuration = p.SlowCometDuration
 	}
 	if len(p.DefaultBodyCodec) == 0 {
-		p.DefaultBodyCodec = "json"
-	}
-	if p.RedialTimes < 0 {
-		p.RedialTimes = 0
+		p.DefaultBodyCodec = DefaultBodyCodec().Name()
 	}
 	if p.RedialInterval <= 0 {
 		p.RedialInterval = time.Millisecond * 100
 	}
+	return nil
+}
+
+var defaultBodyCodec codec.Codec = new(codec.JSONCodec)
+
+// DefaultBodyCodec gets the default body codec.
+func DefaultBodyCodec() codec.Codec {
+	return defaultBodyCodec
+}
+
+// SetDefaultBodyCodec sets the default body codec.
+func SetDefaultBodyCodec(codecID byte) error {
+	c, err := codec.Get(codecID)
+	if err != nil {
+		return err
+	}
+	defaultBodyCodec = c
 	return nil
 }
 

@@ -1,17 +1,27 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/juju/ratelimit"
 	ex "github.com/smallnest/rpcx/errors"
 	"github.com/smallnest/rpcx/protocol"
+	"github.com/smallnest/rpcx/serverplugin"
 	"github.com/smallnest/rpcx/share"
+)
+
+const (
+	FileTransferBufferSize = 1024
 )
 
 var (
@@ -27,6 +37,7 @@ var (
 // One XClient is used only for one service. You should create multiple XClient for multiple services.
 type XClient interface {
 	SetPlugins(plugins PluginContainer)
+	GetPlugins() PluginContainer
 	SetSelector(s Selector)
 	ConfigGeoSelector(latitude, longitude float64)
 	Auth(auth string)
@@ -36,6 +47,8 @@ type XClient interface {
 	Broadcast(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error
 	Fork(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error
 	SendRaw(ctx context.Context, r *protocol.Message) (map[string]string, []byte, error)
+	SendFile(ctx context.Context, fileName string, rateInBytesPerSecond int64) error
+	DownloadFile(ctx context.Context, requestFileName string, saveTo io.Writer) error
 	Close() error
 }
 
@@ -55,13 +68,12 @@ type ServiceDiscovery interface {
 }
 
 type xClient struct {
-	failMode      FailMode
-	selectMode    SelectMode
-	cachedClient  map[string]RPCClient
-	breakers      sync.Map
-	servicePath   string
-	serviceMethod string
-	option        Option
+	failMode     FailMode
+	selectMode   SelectMode
+	cachedClient map[string]RPCClient
+	breakers     sync.Map
+	servicePath  string
+	option       Option
 
 	mu        sync.RWMutex
 	servers   map[string]string
@@ -162,6 +174,10 @@ func (c *xClient) SetPlugins(plugins PluginContainer) {
 	c.Plugins = plugins
 }
 
+func (c *xClient) GetPlugins() PluginContainer {
+	return c.Plugins
+}
+
 // ConfigGeoSelector sets location of client's latitude and longitude,
 // and use newGeoSelector.
 func (c *xClient) ConfigGeoSelector(latitude, longitude float64) {
@@ -207,7 +223,9 @@ func filterByStateAndGroup(group string, servers map[string]string) {
 
 // selects a client from candidates base on c.selectMode
 func (c *xClient) selectClient(ctx context.Context, servicePath, serviceMethod string, args interface{}) (string, RPCClient, error) {
+	c.mu.Lock()
 	k := c.selector.Select(ctx, servicePath, serviceMethod, args)
+	c.mu.Unlock()
 	if k == "" {
 		return "", nil, ErrXClientNoServer
 	}
@@ -216,26 +234,24 @@ func (c *xClient) selectClient(ctx context.Context, servicePath, serviceMethod s
 }
 
 func (c *xClient) getCachedClient(k string) (RPCClient, error) {
-	c.mu.RLock()
+	// TODO: improve the lock
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	breaker, ok := c.breakers.Load(k)
 	if ok && !breaker.(Breaker).Ready() {
-		c.mu.RUnlock()
 		return nil, ErrBreakerOpen
 	}
 
 	client := c.cachedClient[k]
 	if client != nil {
 		if !client.IsClosing() && !client.IsShutdown() {
-			c.mu.RUnlock()
 			return client, nil
 		}
 		delete(c.cachedClient, k)
 		client.Close()
 	}
-	c.mu.RUnlock()
 
-	//double check
-	c.mu.Lock()
 	client = c.cachedClient[k]
 	if client == nil || client.IsShutdown() {
 		network, addr := splitNetworkAndAddress(k)
@@ -256,7 +272,6 @@ func (c *xClient) getCachedClient(k string) (RPCClient, error) {
 				if breaker != nil {
 					breaker.(Breaker).Fail()
 				}
-				c.mu.Unlock()
 				return nil, err
 			}
 			if c.Plugins != nil {
@@ -269,7 +284,6 @@ func (c *xClient) getCachedClient(k string) (RPCClient, error) {
 
 		c.cachedClient[k] = client
 	}
-	c.mu.Unlock()
 
 	return client, nil
 }
@@ -280,11 +294,13 @@ func (c *xClient) getCachedClientWithoutLock(k string) (RPCClient, error) {
 		if !client.IsClosing() && !client.IsShutdown() {
 			return client, nil
 		}
+		delete(c.cachedClient, k)
+		client.Close()
 	}
 
 	//double check
 	client = c.cachedClient[k]
-	if client == nil {
+	if client == nil || client.IsShutdown() {
 		network, addr := splitNetworkAndAddress(k)
 		if network == "inprocess" {
 			client = InprocessClient
@@ -340,7 +356,8 @@ func (c *xClient) Go(ctx context.Context, serviceMethod string, args interface{}
 	if c.auth != "" {
 		metadata := ctx.Value(share.ReqMetaDataKey)
 		if metadata == nil {
-			return nil, errors.New("must set ReqMetaDataKey in context")
+			metadata = map[string]string{}
+			ctx = context.WithValue(ctx, share.ReqMetaDataKey, metadata)
 		}
 		m := metadata.(map[string]string)
 		m[share.AuthKey] = c.auth
@@ -363,7 +380,8 @@ func (c *xClient) Call(ctx context.Context, serviceMethod string, args interface
 	if c.auth != "" {
 		metadata := ctx.Value(share.ReqMetaDataKey)
 		if metadata == nil {
-			return errors.New("must set ReqMetaDataKey in context")
+			metadata = map[string]string{}
+			ctx = context.WithValue(ctx, share.ReqMetaDataKey, metadata)
 		}
 		m := metadata.(map[string]string)
 		m[share.AuthKey] = c.auth
@@ -499,7 +517,8 @@ func (c *xClient) SendRaw(ctx context.Context, r *protocol.Message) (map[string]
 	if c.auth != "" {
 		metadata := ctx.Value(share.ReqMetaDataKey)
 		if metadata == nil {
-			return nil, nil, errors.New("must set ReqMetaDataKey in context")
+			metadata = map[string]string{}
+			ctx = context.WithValue(ctx, share.ReqMetaDataKey, metadata)
 		}
 		m := metadata.(map[string]string)
 		m[share.AuthKey] = c.auth
@@ -582,6 +601,8 @@ func (c *xClient) wrapCall(ctx context.Context, client RPCClient, serviceMethod 
 	if client == nil {
 		return ErrServerUnavailable
 	}
+
+	ctx = share.NewContext(ctx)
 	c.Plugins.DoPreCall(ctx, c.servicePath, serviceMethod, args)
 	err := client.Call(ctx, c.servicePath, serviceMethod, args, reply)
 	c.Plugins.DoPostCall(ctx, c.servicePath, serviceMethod, args, reply, err)
@@ -600,39 +621,40 @@ func (c *xClient) Broadcast(ctx context.Context, serviceMethod string, args inte
 	if c.auth != "" {
 		metadata := ctx.Value(share.ReqMetaDataKey)
 		if metadata == nil {
-			return errors.New("must set ReqMetaDataKey in context")
+			metadata = map[string]string{}
+			ctx = context.WithValue(ctx, share.ReqMetaDataKey, metadata)
 		}
 		m := metadata.(map[string]string)
 		m[share.AuthKey] = c.auth
 	}
 
 	var clients = make(map[string]RPCClient)
-	c.mu.RLock()
+	c.mu.Lock()
 	for k := range c.servers {
 		client, err := c.getCachedClientWithoutLock(k)
 		if err != nil {
-			c.mu.RUnlock()
-			return err
+			continue
 		}
 		clients[k] = client
 	}
-	c.mu.RUnlock()
+	c.mu.Unlock()
 
 	if len(clients) == 0 {
 		return ErrXClientNoServer
 	}
 
-	var err error
+	var err = &ex.MultiError{}
 	l := len(clients)
 	done := make(chan bool, l)
 	for k, client := range clients {
 		k := k
 		client := client
 		go func() {
-			err = c.wrapCall(ctx, client, serviceMethod, args, reply)
-			done <- (err == nil)
-			if err != nil {
+			e := c.wrapCall(ctx, client, serviceMethod, args, reply)
+			done <- (e == nil)
+			if e != nil {
 				c.removeClient(k, client)
+				err.Append(e)
 			}
 		}()
 	}
@@ -647,10 +669,14 @@ check:
 				break check
 			}
 		case <-timeout:
+			err.Append(errors.New(("timeout")))
 			break check
 		}
 	}
 
+	if err.Error() == "[]" {
+		return nil
+	}
 	return err
 }
 
@@ -664,28 +690,29 @@ func (c *xClient) Fork(ctx context.Context, serviceMethod string, args interface
 	if c.auth != "" {
 		metadata := ctx.Value(share.ReqMetaDataKey)
 		if metadata == nil {
-			return errors.New("must set ReqMetaDataKey in context")
+			metadata = map[string]string{}
+			ctx = context.WithValue(ctx, share.ReqMetaDataKey, metadata)
 		}
 		m := metadata.(map[string]string)
 		m[share.AuthKey] = c.auth
 	}
 
 	var clients = make(map[string]RPCClient)
-	c.mu.RLock()
+	c.mu.Lock()
 	for k := range c.servers {
 		client, err := c.getCachedClientWithoutLock(k)
 		if err != nil {
-			c.mu.RUnlock()
-			return err
+			continue
 		}
 		clients[k] = client
 	}
-	c.mu.RUnlock()
+	c.mu.Unlock()
+
 	if len(clients) == 0 {
 		return ErrXClientNoServer
 	}
 
-	var err error
+	var err = &ex.MultiError{}
 	l := len(clients)
 	done := make(chan bool, l)
 	for k, client := range clients {
@@ -697,13 +724,14 @@ func (c *xClient) Fork(ctx context.Context, serviceMethod string, args interface
 				clonedReply = reflect.New(reflect.ValueOf(reply).Elem().Type()).Interface()
 			}
 
-			err = c.wrapCall(ctx, client, serviceMethod, args, clonedReply)
-			if err == nil && reply != nil && clonedReply != nil {
+			e := c.wrapCall(ctx, client, serviceMethod, args, clonedReply)
+			if e == nil && reply != nil && clonedReply != nil {
 				reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(clonedReply).Elem())
 			}
-			done <- (err == nil)
-			if err != nil {
+			done <- (e == nil)
+			if e != nil {
 				c.removeClient(k, client)
+				err.Append(e)
 			}
 
 		}()
@@ -723,8 +751,141 @@ check:
 			}
 
 		case <-timeout:
+			err.Append(errors.New(("timeout")))
 			break check
 		}
+	}
+
+	if err.Error() == "[]" {
+		return nil
+	}
+
+	return err
+}
+
+// SendFile sends a local file to the server.
+// fileName is the path of local file.
+// rateInBytesPerSecond can limit bandwidth of sending,  0 means does not limit the bandwidth, unit is bytes / second.
+func (c *xClient) SendFile(ctx context.Context, fileName string, rateInBytesPerSecond int64) error {
+	file, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+
+	fi, err := os.Stat(fileName)
+	if err != nil {
+		return err
+	}
+
+	args := serverplugin.FileTransferArgs{
+		FileName: fi.Name(),
+		FileSize: fi.Size(),
+	}
+
+	reply := &serverplugin.FileTransferReply{}
+	err = c.Call(ctx, "TransferFile", args, reply)
+	if err != nil {
+		return err
+	}
+
+	conn, err := net.DialTimeout("tcp", reply.Addr, c.option.ConnectTimeout)
+	if err != nil {
+		return err
+	}
+
+	defer conn.Close()
+
+	_, err = conn.Write(reply.Token)
+	if err != nil {
+		return err
+	}
+
+	var tb *ratelimit.Bucket
+
+	if rateInBytesPerSecond > 0 {
+		tb = ratelimit.NewBucketWithRate(float64(rateInBytesPerSecond), rateInBytesPerSecond)
+	}
+
+	sendBuffer := make([]byte, FileTransferBufferSize)
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+		default:
+			if tb != nil {
+				tb.Wait(FileTransferBufferSize)
+			}
+			n, err := file.Read(sendBuffer)
+			if err != nil {
+				if err == io.EOF {
+					return nil
+				} else {
+					return err
+				}
+			}
+			if n == 0 {
+				break loop
+			}
+			_, err = conn.Write(sendBuffer)
+			if err != nil {
+				if err == io.EOF {
+					return nil
+				} else {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *xClient) DownloadFile(ctx context.Context, requestFileName string, saveTo io.Writer) error {
+	args := serverplugin.DownloadFileArgs{
+		FileName: requestFileName,
+	}
+
+	reply := &serverplugin.FileTransferReply{}
+	err := c.Call(ctx, "DownloadFile", args, reply)
+	if err != nil {
+		return err
+	}
+
+	conn, err := net.DialTimeout("tcp", reply.Addr, c.option.ConnectTimeout)
+	if err != nil {
+		return err
+	}
+
+	defer conn.Close()
+
+	_, err = conn.Write(reply.Token)
+	if err != nil {
+		return err
+	}
+
+	buf := make([]byte, FileTransferBufferSize)
+	r := bufio.NewReader(conn)
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+		default:
+			n, er := r.Read(buf)
+			if n > 0 {
+				_, ew := saveTo.Write(buf[0:n])
+				if ew != nil {
+					err = ew
+					break loop
+				}
+			}
+			if er != nil {
+				if er != io.EOF {
+					err = er
+				}
+				break loop
+			}
+		}
+
 	}
 
 	return err

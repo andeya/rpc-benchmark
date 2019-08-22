@@ -74,6 +74,7 @@ It can be used for peer-peer, rpc, gateway, micro services, push services, game 
 
 | version | status  | branch                                   |
 | ------- | ------- | ---------------------------------------- |
+| v6      | release | [master](https://github.com/henrylee2cn/teleport/tree/master) |
 | v5      | release | [v5](https://github.com/henrylee2cn/teleport/tree/v5) |
 | v4      | release | [v4](https://github.com/henrylee2cn/teleport/tree/v4) |
 | v3      | release | [v3](https://github.com/henrylee2cn/teleport/tree/v3) |
@@ -105,8 +106,16 @@ go get -u -f github.com/henrylee2cn/teleport
 - Support setting the size of the reading message (if exceed disconnect it)
 - Provide the context of the handler
 - Client session support automatically redials after disconnection
-- Support network list: `tcp`, `tcp4`, `tcp6`, `unix`, `unixpacket` and so on
 - Provide an operating interface to control the connection file descriptor
+- Support special communication modes, such as websocket, QUIC, evio(event-loop) and so on
+- Support network list:
+    - `tcp`
+    - `tcp4`
+    - `tcp6`
+    - `unix`
+    - `unixpacket`
+    - `quic`
+
 
 ## Example
 
@@ -160,7 +169,7 @@ type Math struct {
 }
 
 // Add handles addition request
-func (m *Math) Add(arg *[]int) (int, *tp.Rerror) {
+func (m *Math) Add(arg *[]int) (int, *tp.Status) {
 	// test query parameter
 	tp.Infof("author: %s", m.Query().Get("author"))
 	// add
@@ -193,18 +202,18 @@ func main() {
 
 	cli.RoutePush(new(Push))
 
-	sess, err := cli.Dial(":9090")
-	if err != nil {
-		tp.Fatalf("%v", err)
+	sess, stat := cli.Dial(":9090")
+	if !stat.OK() {
+		tp.Fatalf("%v", stat)
 	}
 
 	var result int
-	rerr := sess.Call("/math/add?author=henrylee2cn",
+	stat = sess.Call("/math/add?author=henrylee2cn",
 		[]int{1, 2, 3, 4, 5},
 		&result,
-	).Rerror()
-	if rerr != nil {
-		tp.Fatalf("%v", rerr)
+	).Status()
+	if !stat.OK() {
+		tp.Fatalf("%v", stat)
 	}
 	tp.Printf("result: %d", result)
 
@@ -218,7 +227,7 @@ type Push struct {
 }
 
 // Push handles '/push/status' message
-func (p *Push) Status(arg *string) *tp.Rerror {
+func (p *Push) Status(arg *string) *tp.Status {
 	tp.Printf("%s", *arg)
 	return nil
 }
@@ -281,8 +290,8 @@ func SetDefaultProtoFunc(ProtoFunc)
 type Peer interface {
     ...
     ServeConn(conn net.Conn, protoFunc ...ProtoFunc) Session
-    DialContext(ctx context.Context, addr string, protoFunc ...ProtoFunc) (Session, *Rerror)
-    Dial(addr string, protoFunc ...ProtoFunc) (Session, *Rerror)
+    DialContext(ctx context.Context, addr string, protoFunc ...ProtoFunc) (Session, *Status)
+    Dial(addr string, protoFunc ...ProtoFunc) (Session, *Status)
     Listen(protoFunc ...ProtoFunc) error
     ...
 }
@@ -296,11 +305,11 @@ Default protocol `RawProto`(Big Endian):
 {1 byte transfer pipe length}
 {transfer pipe IDs}
 # The following is handled data by transfer pipe
-{2 bytes sequence length}
-{sequence}
+{1 bytes sequence length}
+{sequence (HEX 36 string of int32)}
 {1 byte message type} # e.g. CALL:1; REPLY:2; PUSH:3
-{2 bytes URI length}
-{URI}
+{1 bytes service method length}
+{service method}
 {2 bytes metadata length}
 {metadata(urlencoded)}
 {1 byte body codec id}
@@ -404,13 +413,13 @@ var peer2 = tp.NewPeer(tp.PeerConfig{})
 var sess, err = peer2.Dial("127.0.0.1:8080")
 ```
 
-### Call-Controller-Struct API template
+### Call-Struct API template
 
 ```go
 type Aaa struct {
     tp.CallCtx
 }
-func (x *Aaa) XxZz(arg *<T>) (<T>, *tp.Rerror) {
+func (x *Aaa) XxZz(arg *<T>) (<T>, *tp.Status) {
     ...
     return r, nil
 }
@@ -430,10 +439,38 @@ peer.RouteCall(new(Aaa))
 peer.RouteCallFunc((*Aaa).XxZz)
 ```
 
-### Call-Handler-Function API template
+### Service method mapping
+
+- The default mapping(HTTPServiceMethodMapper) of struct(func) name to service methods:
+    - `AaBb` -> `/aa_bb`
+    - `ABcXYz` -> `/abc_xyz`
+    - `Aa__Bb` -> `/aa_bb`
+    - `aa__bb` -> `/aa_bb`
+    - `ABC__XYZ` -> `/abc_xyz`
+    - `Aa_Bb` -> `/aa/bb`
+    - `aa_bb` -> `/aa/bb`
+    - `ABC_XYZ` -> `/abc/xyz`
+    ```go
+    tp.SetServiceMethodMapper(tp.HTTPServiceMethodMapper)
+    ```
+
+- The mapping(RPCServiceMethodMapper) of struct(func) name to service methods:
+    - `AaBb` -> `AaBb`
+    - `ABcXYz` -> `ABcXYz`
+    - `Aa__Bb` -> `Aa_Bb`
+    - `aa__bb` -> `aa_bb`
+    - `ABC__XYZ` -> `ABC_XYZ`
+    - `Aa_Bb` -> `Aa.Bb`
+    - `aa_bb` -> `aa.bb`
+    - `ABC_XYZ` -> `ABC.XYZ`
+    ```go
+    tp.SetServiceMethodMapper(tp.RPCServiceMethodMapper)
+    ```
+
+### Call-Function API template
 
 ```go
-func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Rerror) {
+func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Status) {
     ...
     return r, nil
 }
@@ -448,13 +485,13 @@ func XxZz(ctx tp.CallCtx, arg *<T>) (<T>, *tp.Rerror) {
 peer.RouteCallFunc(XxZz)
 ```
 
-### Push-Controller-Struct API template
+### Push-Struct API template
 
 ```go
 type Bbb struct {
     tp.PushCtx
 }
-func (b *Bbb) YyZz(arg *<T>) *tp.Rerror {
+func (b *Bbb) YyZz(arg *<T>) *tp.Status {
     ...
     return nil
 }
@@ -474,11 +511,11 @@ peer.RoutePush(new(Bbb))
 peer.RoutePushFunc((*Bbb).YyZz)
 ```
 
-### Push-Handler-Function API template
+### Push-Function API template
 
 ```go
 // YyZz register the handler
-func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Rerror {
+func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Status {
     ...
     return nil
 }
@@ -493,10 +530,10 @@ func YyZz(ctx tp.PushCtx, arg *<T>) *tp.Rerror {
 peer.RoutePushFunc(YyZz)
 ```
 
-### Unknown-Call-Handler-Function API template
+### Unknown-Call-Function API template
 
 ```go
-func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Rerror) {
+func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Status) {
     ...
     return r, nil
 }
@@ -509,10 +546,10 @@ func XxxUnknownCall (ctx tp.UnknownCallCtx) (interface{}, *tp.Rerror) {
 peer.SetUnknownCall(XxxUnknownCall)
 ```
 
-### Unknown-Push-Handler-Function API template
+### Unknown-Push-Function API template
 
 ```go
-func XxxUnknownPush(ctx tp.UnknownPushCtx) *tp.Rerror {
+func XxxUnknownPush(ctx tp.UnknownPushCtx) *tp.Status {
     ...
     return nil
 }
@@ -544,13 +581,13 @@ func (i *ignoreCase) Name() string {
     return "ignoreCase"
 }
 
-func (i *ignoreCase) PostReadCallHeader(ctx tp.ReadCtx) *tp.Rerror {
+func (i *ignoreCase) PostReadCallHeader(ctx tp.ReadCtx) *tp.Status {
     // Dynamic transformation path is lowercase
     ctx.UriObject().Path = strings.ToLower(ctx.UriObject().Path)
     return nil
 }
 
-func (i *ignoreCase) PostReadPushHeader(ctx tp.ReadCtx) *tp.Rerror {
+func (i *ignoreCase) PostReadPushHeader(ctx tp.ReadCtx) *tp.Status {
     // Dynamic transformation path is lowercase
     ctx.UriObject().Path = strings.ToLower(ctx.UriObject().Path)
     return nil
@@ -575,11 +612,11 @@ peer.SetUnknownPush(XxxUnknownPush)
 
 ```go
 type PeerConfig struct {
-    Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix or unixpacket"`
+    Network            string        `yaml:"network"              ini:"network"              comment:"Network; tcp, tcp4, tcp6, unix, unixpacket or quic"`
     LocalIP            string        `yaml:"local_ip"             ini:"local_ip"             comment:"Local IP"`
     ListenPort         uint16        `yaml:"listen_port"          ini:"listen_port"          comment:"Listen port; for server role"`
     DefaultDialTimeout time.Duration `yaml:"default_dial_timeout" ini:"default_dial_timeout" comment:"Default maximum duration for dialing; for client role; ns,µs,ms,s,m,h"`
-    RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; for client role"`
+    RedialTimes        int32         `yaml:"redial_times"         ini:"redial_times"         comment:"The maximum times of attempts to redial, after the connection has been unexpectedly broken; Unlimited when <0; for client role"`
 	RedialInterval     time.Duration `yaml:"redial_interval"      ini:"redial_interval"      comment:"Interval of redialing each time, default 100ms; for client role; ns,µs,ms,s,m,h"`
     DefaultBodyCodec   string        `yaml:"default_body_codec"   ini:"default_body_codec"   comment:"Default body codec type id"`
     DefaultSessionAge  time.Duration `yaml:"default_session_age"  ini:"default_session_age"  comment:"Default session max age, if less than or equal to 0, no time limit; ns,µs,ms,s,m,h"`
@@ -644,6 +681,8 @@ type PeerConfig struct {
 | ---------------------------------------- | ---------------------------------------- | ---------------------------- |
 | [json](https://github.com/henrylee2cn/teleport/blob/v5/codec/json_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | JSON codec(teleport own)     |
 | [protobuf](https://github.com/henrylee2cn/teleport/blob/v5/codec/protobuf_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Protobuf codec(teleport own) |
+| [thrift](https://github.com/henrylee2cn/teleport/blob/v5/codec/thrift_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
+| [xml](https://github.com/henrylee2cn/teleport/blob/v5/codec/xml_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
 | [plain](https://github.com/henrylee2cn/teleport/blob/v5/codec/plain_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Plain text codec(teleport own)   |
 | [form](https://github.com/henrylee2cn/teleport/blob/v5/codec/form_codec.go) | `import "github.com/henrylee2cn/teleport/codec"` | Form(url encode) codec(teleport own)   |
 
@@ -651,7 +690,7 @@ type PeerConfig struct {
 
 | package                                  | import                                   | description                              |
 | ---------------------------------------- | ---------------------------------------- | ---------------------------------------- |
-| [auth](https://github.com/henrylee2cn/teleport/tree/v5/plugin/auth) | `import "github.com/henrylee2cn/teleport/plugin/auth"` | A auth plugin for verifying peer at the first time |
+| [auth](https://github.com/henrylee2cn/teleport/tree/v5/plugin/auth) | `import "github.com/henrylee2cn/teleport/plugin/auth"` | An auth plugin for verifying peer at the first time |
 | [binder](https://github.com/henrylee2cn/teleport/tree/v5/plugin/binder) | `import binder "github.com/henrylee2cn/teleport/plugin/binder"` | Parameter Binding Verification for Struct Handler |
 | [heartbeat](https://github.com/henrylee2cn/teleport/tree/v5/plugin/heartbeat) | `import heartbeat "github.com/henrylee2cn/teleport/plugin/heartbeat"` | A generic timing heartbeat plugin        |
 | [proxy](https://github.com/henrylee2cn/teleport/tree/v5/plugin/proxy) | `import "github.com/henrylee2cn/teleport/plugin/proxy"` | A proxy plugin for handling unknown calling or pushing |
@@ -665,6 +704,7 @@ type PeerConfig struct {
 | [jsonproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/jsonproto) | `import "github.com/henrylee2cn/teleport/proto/jsonproto"` | A JSON socket communication protocol     |
 | [pbproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/pbproto) | `import "github.com/henrylee2cn/teleport/proto/pbproto"` | A Protobuf socket communication protocol     |
 | [thriftproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/thriftproto) | `import "github.com/henrylee2cn/teleport/proto/thriftproto"` | A Thrift communication protocol     |
+| [httproto](https://github.com/henrylee2cn/teleport/tree/v5/proto/httproto) | `import "github.com/henrylee2cn/teleport/proto/httproto"` | A HTTP style socket communication protocol     |
 
 ### Transfer-Filter
 
@@ -679,6 +719,7 @@ type PeerConfig struct {
 | ---------------------------------------- | ---------------------------------------- | ---------------------------------------- |
 | [multiclient](https://github.com/henrylee2cn/teleport/tree/v5/mixer/multiclient) | `import "github.com/henrylee2cn/teleport/mixer/multiclient"` | Higher throughput client connection pool when transferring large messages (such as downloading files) |
 | [websocket](https://github.com/henrylee2cn/teleport/tree/v5/mixer/websocket) | `import "github.com/henrylee2cn/teleport/mixer/websocket"` | Makes the Teleport framework compatible with websocket protocol as specified in RFC 6455 |
+| [evio](https://github.com/henrylee2cn/teleport/tree/v5/mixer/evio) | `import "github.com/henrylee2cn/teleport/mixer/evio"` | A fast event-loop networking framework that uses the teleport API layer |
 | [html](https://github.com/xiaoenai/tp-micro/tree/master/helper/mod-html) | `html "github.com/xiaoenai/tp-micro/helper/mod-html"` | HTML render for http client |
 
 ## Projects based on Teleport
@@ -690,13 +731,14 @@ type PeerConfig struct {
 
 ## Business Users
 
-<a href="http://www.xiaoenai.com"><img src="https://statics.xiaoenai.com/v5/img/logo_zh.png" height="50" alt="深圳市梦之舵信息技术有限公司"/></a>
+<a href="http://www.xiaoenai.com"><img src="https://raw.githubusercontent.com/henrylee2cn/imgs-repo/master/xiaoenai.png" height="50" alt="深圳市梦之舵信息技术有限公司"/></a>
 &nbsp;&nbsp;
 <a href="https://tech.pingan.com/index.html"><img src="http://pa-tech.hirede.com/templates/pa-tech/Images/logo.png" height="50" alt="平安科技"/></a>
 <br/>
 <a href="http://www.fun.tv"><img src="http://static.funshion.com/open/static/img/logo.gif" height="70" alt="北京风行在线技术有限公司"/></a>
 &nbsp;&nbsp;
 <a href="http://www.kejishidai.cn"><img src="http://simg.ktvms.com/picture/logo.png" height="70" alt="北京可即时代网络公司"/></a>
+<a href="https://www.kuaishou.com/"><img src="https://inews.gtimg.com/newsapp_bt/0/4400789257/1000" height="70" alt="快手短视频平台"/></a>
 
 ## License
 

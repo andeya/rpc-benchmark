@@ -26,6 +26,7 @@ import (
 	"github.com/henrylee2cn/goutil/errors"
 	"github.com/henrylee2cn/goutil/graceful"
 	"github.com/henrylee2cn/goutil/graceful/inherit_net"
+	"github.com/henrylee2cn/teleport/quic"
 )
 
 var peers = struct {
@@ -107,7 +108,7 @@ func SetShutdown(timeout time.Duration, firstSweep, beforeExiting func() error) 
 	}
 	FirstSweep = func() error {
 		setParentLaddrList()
-		return errors.Merge(firstSweep(), inherit_net.SetInherited())
+		return errors.Merge(firstSweep(), inherit_net.SetInherited(), quic.SetInherited())
 	}
 	BeforeExiting = func() error {
 		return errors.Merge(shutdown(), beforeExiting())
@@ -127,8 +128,10 @@ func Reboot(timeout ...time.Duration) {
 	graceful.Reboot(timeout...)
 }
 
-// NewInheritListener creates a new listener that can be inherited on reboot.
-func NewInheritListener(network, laddr string, tlsConfig *tls.Config) (net.Listener, error) {
+var testTLSConfig = GenerateTLSConfigForServer()
+
+// NewInheritedListener creates a new inherited listener.
+func NewInheritedListener(network, laddr string, tlsConfig *tls.Config) (lis net.Listener, err error) {
 	host, port, err := net.SplitHostPort(laddr)
 	if err != nil {
 		return nil, err
@@ -136,22 +139,32 @@ func NewInheritListener(network, laddr string, tlsConfig *tls.Config) (net.Liste
 	if port == "0" {
 		laddr = popParentLaddr(network, host, laddr)
 	}
-	lis, err := inherit_net.Listen(network, laddr)
-	if err != nil {
-		return nil, err
-	}
-	if tlsConfig != nil {
-		if len(tlsConfig.Certificates) == 0 && tlsConfig.GetCertificate == nil {
-			return nil, errors.New("tls: neither Certificates nor GetCertificate set in Config")
+
+	if network == "quic" {
+		if tlsConfig == nil {
+			tlsConfig = testTLSConfig
 		}
-		lis = tls.NewListener(lis, tlsConfig)
+		lis, err = quic.InheritedListen(laddr, tlsConfig, nil)
+
+	} else {
+		lis, err = inherit_net.Listen(network, laddr)
+		if err == nil && tlsConfig != nil {
+			if len(tlsConfig.Certificates) == 0 && tlsConfig.GetCertificate == nil {
+				return nil, errors.New("tls: neither Certificates nor GetCertificate set in Config")
+			}
+			lis = tls.NewListener(lis, tlsConfig)
+		}
 	}
-	return lis, nil
+
+	if err == nil {
+		pushParentLaddr(network, host, lis.Addr().String())
+	}
+	return
 }
 
 const parentLaddrsKey = "LISTEN_PARENT_ADDRS"
 
-var parentAddrList map[string]map[string][]string // network:host:[host:port]
+var parentAddrList = make(map[string]map[string][]string, 2) // network:host:[host:port]
 var parentAddrListMutex sync.Mutex
 
 func initParentLaddrList() {
@@ -160,25 +173,22 @@ func initParentLaddrList() {
 }
 
 func setParentLaddrList() {
-	var parentAddrList = make(map[string]map[string][]string)
-	peers.rwmu.RLock()
-	for p := range peers.list {
-		for lis := range p.listeners {
-			addr := lis.Addr()
-			m, ok := parentAddrList[addr.Network()]
-			if !ok {
-				m = make(map[string][]string)
-				parentAddrList[addr.Network()] = m
-			}
-			host, _, _ := net.SplitHostPort(addr.String())
-			m[host] = append(m[host], addr.String())
-		}
-	}
-	peers.rwmu.RUnlock()
 	b, _ := json.Marshal(parentAddrList)
 	graceful.AddInherited(nil, []*graceful.Env{
 		{K: parentLaddrsKey, V: goutil.BytesToString(b)},
 	})
+}
+
+func pushParentLaddr(network, host, addr string) {
+	parentAddrListMutex.Lock()
+	defer parentAddrListMutex.Unlock()
+	unifyLocalhost(&host)
+	m, ok := parentAddrList[network]
+	if !ok {
+		m = make(map[string][]string)
+		parentAddrList[network] = m
+	}
+	m[host] = append(m[host], addr)
 }
 
 func popParentLaddr(network, host, laddr string) string {
