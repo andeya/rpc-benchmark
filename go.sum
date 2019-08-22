@@ -119,8 +119,14 @@ github.com/henrylee2cn/cfgo v0.0.0-20180417024816-e6c3cc325b21/go.mod h1:lfF29QC
 github.com/henrylee2cn/go-logging v0.0.0-20180706142240-c02b68314b1a/go.mod h1:ukskeDS+VBn9cKqzrjz3fxV30e61oK0WqE0nWzZBBQg=
 github.com/henrylee2cn/goutil v0.0.0-20190630130639-d26f3f84e806 h1:t1+bgwvPE2RHU/FhGmvErIB5H9OdihA61b2XUjXza2A=
 github.com/henrylee2cn/goutil v0.0.0-20190630130639-d26f3f84e806/go.mod h1:I9qYeMYwdKC7UFXMECNzCEv0fYuolqLeBMqsmeG7IVo=
+github.com/henrylee2cn/goutil v0.0.0-20190821034659-6bb2648c959b h1:UVLiUix7KJ/rswZBVEB5ImawH5M/2kC7cpEuBWXPopk=
+github.com/henrylee2cn/goutil v0.0.0-20190821034659-6bb2648c959b/go.mod h1:I9qYeMYwdKC7UFXMECNzCEv0fYuolqLeBMqsmeG7IVo=
 github.com/henrylee2cn/teleport v0.0.0-20190822091541-daffb1ff6f52 h1:KGtsHqfdTAp/EltEaIjr37Bzp3v6e87lD5BDyF8Rre8=
 github.com/henrylee2cn/teleport v0.0.0-20190822091541-daffb1ff6f52/go.mod h1:rI4f0X/Mty0rhA+CNhqgONFNHTb2TtiGv+H/HWrhdrw=
+github.com/henrylee2cn/teleport v0.0.0-20190822100354-53b38a521270 h1:DdakcJVfNDnl7izwJPJDyAEh3e4ii3Y5uNiahwonTeE=
+github.com/henrylee2cn/teleport v0.0.0-20190822100354-53b38a521270/go.mod h1:rI4f0X/Mty0rhA+CNhqgONFNHTb2TtiGv+H/HWrhdrw=
+github.com/henrylee2cn/teleport v5.0.0+incompatible h1:YRIka8ZzivuLvWE522waGxpBKH97Mf2kroo0B5PRrcg=
+github.com/henrylee2cn/teleport v5.0.0+incompatible/go.mod h1:byqZP9v6NLpMWf+8rm1ujnoiLTzwgdHb1GJXvGMaNPs=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
 github.com/huandu/xstrings v1.0.0 h1:pO2K/gKgKaat5LdpAhxhluX2GPQMaI3W5FUz/I/UnWk=
 github.com/huandu/xstrings v1.0.0/go.mod h1:4qWG/gcEcfX4z/mBDHJ++3ReCw9ibxbsNJbcucJdbSo=
@@ -147,6 +153,7 @@ github.com/kr/logfmt v0.0.0-20140226030751-b84e30acd515/go.mod h1:+0opPa2QZZtGFB
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
+github.com/lucas-clemente/quic-go v0.11.0 h1:R7uxGrBWWSp817cdhkrunFsOA26vadf4EI9slWzkjlQ=
 github.com/lucas-clemente/quic-go v0.11.0/go.mod h1:PpMmPfPKO9nKJ/psF49ESTAGQSdfXxlg1otPbEB2nOw=
 github.com/lucas-clemente/quic-go v0.11.2 h1:Mop0ac3zALaBR3wGs6j8OYe/tcFvFsxTUFMkE/7yUOI=
 github.com/lucas-clemente/quic-go v0.11.2/go.mod h1:PpMmPfPKO9nKJ/psF49ESTAGQSdfXxlg1otPbEB2nOw=
@@ -234,7 +241,11 @@ github.com/templexxx/cpufeat v0.0.0-20180724012125-cef66df7f161/go.mod h1:wM7WEv
 github.com/templexxx/xor v0.0.0-20181023030647-4e92f724b73b h1:mnG1fcsIB1d/3vbkBak2MM0u+vhGhlQwpeimUi7QncM=
 github.com/templexxx/xor v0.0.0-20181023030647-4e92f724b73b/go.mod h1:5XA7W9S6mni3h5uvOC75dA3m9CCCaS83lltmc0ukdi4=
 github.com/tidwall/gjson v1.2.2/go.mod h1:P256ACg0Mn+j1RXIDXoss50DeIABTYK1PULOJHhxOls=
+github.com/tidwall/gjson v1.3.2 h1:+7p3qQFaH3fOMXAJSrdZwGKcOO/lYdGS0HqGhPqDdTI=
+github.com/tidwall/gjson v1.3.2/go.mod h1:P256ACg0Mn+j1RXIDXoss50DeIABTYK1PULOJHhxOls=
+github.com/tidwall/match v1.0.1 h1:PnKP62LPNxHKTwvHHZZzdOAOCtsJTjo6dZLCwpKm5xc=
 github.com/tidwall/match v1.0.1/go.mod h1:LujAq0jyVjBy028G1WhWfIzbpQfMO8bBZ6Tyb0+pL9E=
+github.com/tidwall/pretty v1.0.0 h1:HsD+QiTn7sK6flMKIvNmpqz1qrpP3Ps6jOKIKMooyg4=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
 github.com/tinylib/msgp v1.0.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=
 github.com/tjfoc/gmsm v1.0.1 h1:R11HlqhXkDospckjZEihx9SW/2VW0RgdwrykyWMFOQU=
@@ -290,6 +301,7 @@ golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8/go.mod h1:STP8DvDyc/dI5b8T5h
 golang.org/x/sys v0.0.0-20181116152217-5ac8a444bdc5/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+golang.org/x/sys v0.0.0-20190228124157-a34e9553db1e h1:ZytStCyV048ZqDsWHiYDdoI2Vd4msMcrDECFxS+tL9c=
 golang.org/x/sys v0.0.0-20190228124157-a34e9553db1e/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190626221950-04f50cda93cb h1:fgwFCsaw9buMuxNd6+DQfAuSFqbNiQZpcgJQAgJsK6k=
 golang.org/x/sys v0.0.0-20190626221950-04f50cda93cb/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=

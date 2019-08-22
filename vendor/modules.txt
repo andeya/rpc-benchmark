@@ -70,7 +70,7 @@ github.com/hashicorp/golang-lru/simplelru
 github.com/hashicorp/serf/coordinate
 # github.com/henrylee2cn/cfgo v0.0.0-20180417024816-e6c3cc325b21
 github.com/henrylee2cn/cfgo
-# github.com/henrylee2cn/goutil v0.0.0-20190630130639-d26f3f84e806
+# github.com/henrylee2cn/goutil v0.0.0-20190821034659-6bb2648c959b
 github.com/henrylee2cn/goutil
 github.com/henrylee2cn/goutil/coarsetime
 github.com/henrylee2cn/goutil/errors
@@ -78,7 +78,7 @@ github.com/henrylee2cn/goutil/graceful
 github.com/henrylee2cn/goutil/graceful/inherit_net
 github.com/henrylee2cn/goutil/pool
 github.com/henrylee2cn/goutil/status
-# github.com/henrylee2cn/teleport v0.0.0-20190822091541-daffb1ff6f52
+# github.com/henrylee2cn/teleport v0.0.0-20190822100354-53b38a521270
 github.com/henrylee2cn/teleport
 github.com/henrylee2cn/teleport/codec
 github.com/henrylee2cn/teleport/quic
