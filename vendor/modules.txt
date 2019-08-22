@@ -78,7 +78,7 @@ github.com/henrylee2cn/goutil/graceful
 github.com/henrylee2cn/goutil/graceful/inherit_net
 github.com/henrylee2cn/goutil/pool
 github.com/henrylee2cn/goutil/status
-# github.com/henrylee2cn/teleport v0.0.0-20190822100354-53b38a521270
+# github.com/henrylee2cn/teleport v0.0.0-20190822111459-622d1aebcd77
 github.com/henrylee2cn/teleport
 github.com/henrylee2cn/teleport/codec
 github.com/henrylee2cn/teleport/quic

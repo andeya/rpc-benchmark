@@ -125,6 +125,8 @@ github.com/henrylee2cn/teleport v0.0.0-20190822091541-daffb1ff6f52 h1:KGtsHqfdTA
 github.com/henrylee2cn/teleport v0.0.0-20190822091541-daffb1ff6f52/go.mod h1:rI4f0X/Mty0rhA+CNhqgONFNHTb2TtiGv+H/HWrhdrw=
 github.com/henrylee2cn/teleport v0.0.0-20190822100354-53b38a521270 h1:DdakcJVfNDnl7izwJPJDyAEh3e4ii3Y5uNiahwonTeE=
 github.com/henrylee2cn/teleport v0.0.0-20190822100354-53b38a521270/go.mod h1:rI4f0X/Mty0rhA+CNhqgONFNHTb2TtiGv+H/HWrhdrw=
+github.com/henrylee2cn/teleport v0.0.0-20190822111459-622d1aebcd77 h1:CLky809+TvIqwbAh5Ambpl9j+q7dt2MzY3t8lJcHqn0=
+github.com/henrylee2cn/teleport v0.0.0-20190822111459-622d1aebcd77/go.mod h1:rI4f0X/Mty0rhA+CNhqgONFNHTb2TtiGv+H/HWrhdrw=
 github.com/henrylee2cn/teleport v5.0.0+incompatible h1:YRIka8ZzivuLvWE522waGxpBKH97Mf2kroo0B5PRrcg=
 github.com/henrylee2cn/teleport v5.0.0+incompatible/go.mod h1:byqZP9v6NLpMWf+8rm1ujnoiLTzwgdHb1GJXvGMaNPs=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
