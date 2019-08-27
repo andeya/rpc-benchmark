@@ -167,12 +167,11 @@ type handlerCtx struct {
 	arg             reflect.Value
 	callCmd         *callCmd
 	swap            goutil.Map
-	start           time.Time
+	start           int64
 	cost            time.Duration
 	pluginContainer *PluginContainer
 	stat            *Status
 	context         context.Context
-	next            *handlerCtx
 }
 
 var (
@@ -411,6 +410,10 @@ func (c *handlerCtx) bindPush(header Header) interface{} {
 	return c.input.Body()
 }
 
+func (c *handlerCtx) recordCost() {
+	c.cost = time.Duration(c.sess.timeNow() - c.start)
+}
+
 // handlePush handles push.
 func (c *handlerCtx) handlePush() {
 	if age := c.sess.ContextAge(); age > 0 {
@@ -421,7 +424,7 @@ func (c *handlerCtx) handlePush() {
 		if p := recover(); p != nil {
 			Errorf("panic:%v\n%s", p, goutil.PanicTrace(2))
 		}
-		c.cost = c.sess.timeSince(c.start)
+		c.recordCost()
 		if enablePrintRunLog() {
 			c.sess.printRunLog(c.RealIP(), c.cost, c.input, nil, typePushHandle)
 		}
@@ -489,7 +492,7 @@ func (c *handlerCtx) handleCall() {
 				c.writeReply(c.stat)
 			}
 		}
-		c.cost = c.sess.timeSince(c.start)
+		c.recordCost()
 		if enablePrintRunLog() {
 			c.sess.printRunLog(c.RealIP(), c.cost, c.input, c.output, typeCallHandle)
 		}
@@ -621,7 +624,7 @@ func (c *handlerCtx) handleReply() {
 		c.callCmd.result = c.input.Body()
 		c.stat = c.callCmd.stat
 		c.callCmd.done()
-		c.callCmd.cost = c.sess.timeSince(c.callCmd.start)
+		c.callCmd.cost = time.Duration(c.sess.timeNow() - c.callCmd.start)
 		if enablePrintRunLog() {
 			c.sess.printRunLog(c.RealIP(), c.callCmd.cost, c.input, c.callCmd.output, typeCallLaunch)
 		}
@@ -708,21 +711,18 @@ type (
 		CostTime() time.Duration
 	}
 	callCmd struct {
+		start          int64
+		cost           time.Duration
 		sess           *session
 		output         Message
 		result         interface{}
 		stat           *Status
-		inputBodyCodec byte
 		inputMeta      *utils.Args
-		start          time.Time
-		cost           time.Duration
 		swap           goutil.Map
 		mu             sync.Mutex
-
-		// Send itself to the public channel when call is complete.
-		callCmdChan chan<- CallCmd
-		// Strobes when call is complete.
-		doneChan chan struct{}
+		callCmdChan    chan<- CallCmd // Send itself to the public channel when call is complete.
+		doneChan       chan struct{}  // Strobes when call is complete.
+		inputBodyCodec byte
 	}
 )
 
